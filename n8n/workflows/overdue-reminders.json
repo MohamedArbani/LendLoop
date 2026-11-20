@@ -1,0 +1,275 @@
+{
+  "id": "lendloopOverdue1",
+  "name": "LendLoop \u00b7 Daily overdue reminders",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "811ea09d-562f-5524-9967-7cc4d89f9be2",
+      "name": "Daily at 09 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        -100
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "e7620814-1caf-54b1-9b4d-3eca5684e4be",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { cursor: null } }];"
+      },
+      "id": "54f30726-f333-55ea-acea-39d4c572bec5",
+      "name": "Start first page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { createHmac } = require('crypto');\nconst secret = $env.N8N_TO_CONVEX_SECRET;\nif (!secret) throw new Error('Convex signing key unavailable.');\nconst { cursor } = $input.first().json;\nconst timestamp = String(Date.now());\nconst body = JSON.stringify({ cursor });\nconst signature = createHmac('sha256', secret)\n  .update('overdue\\n' + timestamp + '\\n' + body).digest('hex');\nreturn [{ json: { timestamp, body, signature } }];"
+      },
+      "id": "1a8e73f3-5690-5002-9227-89278294b1f8",
+      "name": "Sign overdue lookup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.CONVEX_SITE_URL.replace(/\\/$/, '') + '/automation/overdue' }}",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 4000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "id": "f9ab5de2-59bc-54a4-b77b-224e8c206ecc",
+      "name": "Fetch overdue page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "jsCode": "const { createHmac } = require('crypto');\nconst secret = $env.N8N_TO_CONVEX_SECRET;\nif (!secret) throw new Error('Convex signing key unavailable.');\nconst { loans, day } = $input.first().json;\nconst timestamp = String(Date.now());\nconst body = JSON.stringify({ loanIds: loans, day });\nconst signature = createHmac('sha256', secret)\n  .update('reminder-delivered\\n' + timestamp + '\\n' + body).digest('hex');\nreturn [{ json: { timestamp, body, signature } }];"
+      },
+      "id": "ea11b114-bc6d-56d2-ac28-02831a703df8",
+      "name": "Sign reminder batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.CONVEX_SITE_URL.replace(/\\/$/, '') + '/automation/reminder-delivered' }}",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 4000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "id": "2bec7f62-7039-5482-8c35-c40ef3fbd478",
+      "name": "Log reminders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "jsCode": "const { cursor } = $('Fetch overdue page').itemMatching(0).json;\nreturn cursor === null ? [] : [{ json: { cursor }, pairedItem: { item: 0 } }];"
+      },
+      "id": "30ac98e4-5b43-50b9-a9e4-1e8d7bd65999",
+      "name": "Continue with next cursor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Start first page": {
+      "main": [
+        [
+          {
+            "node": "Sign overdue lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign overdue lookup": {
+      "main": [
+        [
+          {
+            "node": "Fetch overdue page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch overdue page": {
+      "main": [
+        [
+          {
+            "node": "Sign reminder batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign reminder batch": {
+      "main": [
+        [
+          {
+            "node": "Log reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log reminders": {
+      "main": [
+        [
+          {
+            "node": "Continue with next cursor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily at 09 UTC": {
+      "main": [
+        [
+          {
+            "node": "Start first page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Start first page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue with next cursor": {
+      "main": [
+        [
+          {
+            "node": "Sign overdue lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveExecutionProgress": false,
+    "errorWorkflow": "lendloopErrors01",
+    "executionTimeout": 900
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+.next/
+.env*
+!.env.example
+!n8n/.env.example
+*.tsbuildinfo
+coverage/
+
+.convex/

@@ -1,0 +1,230 @@
+{
+  "id": "lendloopRequest1",
+  "name": "LendLoop \u00b7 Request notification",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-request-event",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d9ca8576-871f-5928-9c28-b01a6eedd307",
+      "name": "Request webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "946767cd-3005-5b5a-a97d-4a2048e80548"
+    },
+    {
+      "parameters": {
+        "jsCode": "const { createHmac, timingSafeEqual } = require('crypto');\nconst { headers, body } = $input.first().json;\nconst secret = $env.CONVEX_TO_N8N_SECRET;\nif (!secret) throw new Error('Request signing key unavailable.');\nconst timestamp = headers['x-lendloop-timestamp'];\nconst supplied = headers['x-lendloop-signature'];\nconst payload = body?.payload;\nif (!/^\\d{13}$/.test(timestamp ?? '') || Math.abs(Date.now() - Number(timestamp)) > 300_000 ||\n    !/^[a-f0-9]{64}$/.test(supplied ?? '') || typeof payload !== 'string' || payload.length > 256) {\n  return [{ json: { authorized: false } }];\n}\nconst expected = createHmac('sha256', secret).update('request-event\\n' + timestamp + '\\n' + payload).digest();\nif (!timingSafeEqual(expected, Buffer.from(supplied, 'hex'))) return [{ json: { authorized: false } }];\nconst { eventId } = JSON.parse(payload);\nif (typeof eventId !== 'string' || !eventId) throw new Error('Missing event reference.');\nreturn [{ json: { authorized: true, eventId } }];"
+      },
+      "id": "8a1bd8de-b2d2-50b3-85c4-84c0f6582b6c",
+      "name": "Verify request signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "6d636e35-4963-57e3-ac36-b373390c5613",
+              "leftValue": "={{ $json.authorized }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f2b32dc7-895c-5615-9b5e-57512d018201",
+      "name": "Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { createHmac } = require('crypto');\nconst secret = $env.N8N_TO_CONVEX_SECRET;\nif (!secret) throw new Error('Convex signing key unavailable.');\nconst { eventId } = $input.first().json;\nconst timestamp = String(Date.now());\nconst body = JSON.stringify({ eventId });\nconst signature = createHmac('sha256', secret)\n  .update('event-delivered\\n' + timestamp + '\\n' + body).digest('hex');\nreturn [{ json: { timestamp, body, signature } }];"
+      },
+      "id": "1ed0b138-8bd6-5c34-97a9-7fa5d78daf10",
+      "name": "Sign event delivery",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.CONVEX_SITE_URL.replace(/\\/$/, '') + '/automation/event-delivered' }}",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 4000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "id": "9b7c8839-6853-5aa5-8374-8ee66b056ccb",
+      "name": "Log notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true } }}",
+        "options": {}
+      },
+      "id": "63ed3cfe-0a0a-5c1a-999b-7a8b4da61912",
+      "name": "Acknowledge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1200,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: \"Unauthorized\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "cb8c4a47-27ee-5275-81ab-d398b18756f2",
+      "name": "Reject unsigned request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        720,
+        180
+      ]
+    }
+  ],
+  "connections": {
+    "Request webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify request signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify request signature": {
+      "main": [
+        [
+          {
+            "node": "Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign event delivery": {
+      "main": [
+        [
+          {
+            "node": "Log notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log notification": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Sign event delivery",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject unsigned request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveExecutionProgress": false,
+    "errorWorkflow": "lendloopErrors01"
+  }
+}
