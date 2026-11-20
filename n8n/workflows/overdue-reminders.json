@@ -20,10 +20,7 @@
       "name": "Daily at 09 UTC",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [
-        0,
-        -100
-      ]
+      "position": [0, -100]
     },
     {
       "parameters": {},
@@ -31,10 +28,7 @@
       "name": "Run manually",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [
-        0,
-        100
-      ]
+      "position": [0, 100]
     },
     {
       "parameters": {
@@ -44,10 +38,7 @@
       "name": "Start first page",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        220,
-        0
-      ]
+      "position": [220, 0]
     },
     {
       "parameters": {
@@ -57,10 +48,7 @@
       "name": "Sign overdue lookup",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        440,
-        0
-      ]
+      "position": [440, 0]
     },
     {
       "parameters": {
@@ -96,10 +84,7 @@
       "name": "Fetch overdue page",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        660,
-        0
-      ],
+      "position": [660, 0],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 1000
@@ -112,10 +97,7 @@
       "name": "Sign reminder batch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        880,
-        0
-      ]
+      "position": [880, 0]
     },
     {
       "parameters": {
@@ -151,10 +133,7 @@
       "name": "Log reminders",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        1100,
-        0
-      ],
+      "position": [1100, 0],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 1000
@@ -167,10 +146,7 @@
       "name": "Continue with next cursor",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1320,
-        0
-      ]
+      "position": [1320, 0]
     }
   ],
   "connections": {

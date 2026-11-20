@@ -2,14 +2,15 @@
   "name": "lendloop",
   "version": "1.0.0",
   "private": true,
-  "engines": { "node": ">=22" },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "test": "vitest run"
+    "lint": "vp lint . && eslint .",
+    "test": "vp test run",
+    "check": "vp check && eslint . && tsc --noEmit",
+    "format": "vp fmt"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.0.0",
@@ -28,6 +29,13 @@
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.2.0",
     "typescript": "^5.9.0",
-    "vitest": "^4.0.0"
-  }
+    "vite-plus": "1.7.0"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@8.3.8000"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  },
+  "packageManager": "npm@11.17.0"
 }

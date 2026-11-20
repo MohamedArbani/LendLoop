@@ -44,6 +44,7 @@ To finish Clerk:
 
    The running Convex watcher will retry the function deployment automatically.
    `convex/auth.config.ts` already reads this variable; no source edit is needed.
+
 5. Start or restart Next.js after saving the keys:
 
    ```sh
@@ -55,7 +56,7 @@ and `npm run dev`. Open [LendLoop](http://localhost:3000).
 
 ### Alternative: hosted Convex
 
-Use Node.js 22 or newer, npm, Docker Compose, a Clerk development application, and a Convex development deployment. Next.js and n8n run locally. Hosted Convex needs an HTTPS route to the n8n webhook. Use a tunnel or an HTTPS reverse proxy that forwards **only** `POST /webhook/lendloop-request-event` to local n8n. Keep the n8n editor on localhost.
+Use Node.js 22.18+, 24.11+, or 26+ (see `engines.node`), npm 11.17, Docker Compose, a Clerk development application, and a Convex development deployment. Next.js and n8n run locally. Hosted Convex needs an HTTPS route to the n8n webhook. Use a tunnel or an HTTPS reverse proxy that forwards **only** `POST /webhook/lendloop-request-event` to local n8n. Keep the n8n editor on localhost.
 
 ### 1. Set up Clerk and Convex
 
@@ -67,18 +68,18 @@ npx convex dev
 
 Keep Convex running while configuring the project. If the first push reports a missing environment variable, set it as described below and let Convex retry. For Clerk, create a JWT template using the **Convex** preset. Keep the template name and audience as `convex`. Copy the issuer URL from the template into the Convex deployment environment and put the Clerk publishable and secret keys into `.env.local`. The Convex CLI normally writes `NEXT_PUBLIC_CONVEX_URL` there.
 
-| Where | Variable | Value |
-| --- | --- | --- |
-| Next.js `.env.local` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk development publishable key |
-| Next.js `.env.local` | `CLERK_SECRET_KEY` | Clerk development secret key |
-| Next.js `.env.local` | `NEXT_PUBLIC_CONVEX_URL` | Convex client URL ending in `.convex.cloud` |
-| Convex deployment | `CLERK_JWT_ISSUER_DOMAIN` | Clerk JWT template issuer URL |
-| Convex deployment | `N8N_REQUEST_WEBHOOK_URL` | Full HTTPS production webhook URL ending in `/webhook/lendloop-request-event` |
-| Convex and n8n | `CONVEX_TO_N8N_SECRET` | Secret for request events |
-| Convex and n8n | `N8N_TO_CONVEX_SECRET` | A different secret for lookups and write-backs |
-| n8n `n8n/.env` | `CONVEX_SITE_URL` | Convex HTTP actions URL ending in `.convex.site` |
-| n8n `n8n/.env` | `N8N_ENCRYPTION_KEY` | Independent n8n credential encryption key |
-| n8n `n8n/.env` | `WEBHOOK_URL` | Base HTTPS URL of the webhook ingress, ending with `/` |
+| Where                | Variable                            | Value                                                                         |
+| -------------------- | ----------------------------------- | ----------------------------------------------------------------------------- |
+| Next.js `.env.local` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk development publishable key                                             |
+| Next.js `.env.local` | `CLERK_SECRET_KEY`                  | Clerk development secret key                                                  |
+| Next.js `.env.local` | `NEXT_PUBLIC_CONVEX_URL`            | Convex client URL ending in `.convex.cloud`                                   |
+| Convex deployment    | `CLERK_JWT_ISSUER_DOMAIN`           | Clerk JWT template issuer URL                                                 |
+| Convex deployment    | `N8N_REQUEST_WEBHOOK_URL`           | Full HTTPS production webhook URL ending in `/webhook/lendloop-request-event` |
+| Convex and n8n       | `CONVEX_TO_N8N_SECRET`              | Secret for request events                                                     |
+| Convex and n8n       | `N8N_TO_CONVEX_SECRET`              | A different secret for lookups and write-backs                                |
+| n8n `n8n/.env`       | `CONVEX_SITE_URL`                   | Convex HTTP actions URL ending in `.convex.site`                              |
+| n8n `n8n/.env`       | `N8N_ENCRYPTION_KEY`                | Independent n8n credential encryption key                                     |
+| n8n `n8n/.env`       | `WEBHOOK_URL`                       | Base HTTPS URL of the webhook ingress, ending with `/`                        |
 
 Use `openssl rand -hex 32` once for each of the three secrets. Set the Convex values in the deployment dashboard and copy the two corresponding signing keys into the ignored `n8n/.env` file.
 
@@ -113,14 +114,14 @@ The Compose profile runs a dedicated single-owner n8n with an internal task runn
 
 ## Architecture
 
-| Component | Responsibility |
-| --- | --- |
-| Next.js App Router and Clerk | Public catalog and sign-in, member views, category filter, listing and loan forms |
-| Convex queries and mutations | Identity, role and ownership checks, lifecycle and date validation, booking conflicts, notifications |
-| Convex scheduler and outbox | Atomically queue status changes with loan writes, dispatch signed events, retry and record terminal failures |
-| n8n request workflow | Verify the event signature, call the signed mock delivery endpoint, then acknowledge Convex |
-| n8n daily workflow | At 09:00 UTC, page through approved overdue loans and log each eligible borrower’s reminder |
-| n8n error workflow | Capture failed workflow and execution IDs for triage |
+| Component                    | Responsibility                                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Next.js App Router and Clerk | Public catalog and sign-in, member views, category filter, listing and loan forms                            |
+| Convex queries and mutations | Identity, role and ownership checks, lifecycle and date validation, booking conflicts, notifications         |
+| Convex scheduler and outbox  | Atomically queue status changes with loan writes, dispatch signed events, retry and record terminal failures |
+| n8n request workflow         | Verify the event signature, call the signed mock delivery endpoint, then acknowledge Convex                  |
+| n8n daily workflow           | At 09:00 UTC, page through approved overdue loans and log each eligible borrower’s reminder                  |
+| n8n error workflow           | Capture failed workflow and execution IDs for triage                                                         |
 
 Loan dates are inclusive UTC calendar days. A lender can approve or decline pending requests and mark active loans returned once the loan starts. Borrowers can cancel their own pending requests. Booking approval checks overlaps in the same Convex transaction that changes the state. Removing a listing archives it and cancels pending requests. Approved loans can still be returned and loan history remains available.
 
@@ -136,14 +137,56 @@ Loan dates are inclusive UTC calendar days. A lender can approve or decline pend
 
 Move automation signing keys to a managed secret store and into a dedicated signing node or worker with rotation support and tighter editor permissions. Encrypt and restrict execution data, set explicit retention, alert on dead letters or missed reminder runs, and give operators audited replay controls. Replace the mock inbox with a notification provider that accepts a stable idempotency key or supports reconciliation after ambiguous delivery. Add tenant-scoped authorization and audit trails, rate limits, paginated board and loan queries, and load tests for simultaneous approvals. For a healthcare deployment, review access, retention, vendor agreements, and data flow against the applicable requirements before moving any patient data through an integration.
 
-## Checks
+## Vite+ toolchain and checks
+
+This project pins Vite+ 1.7.0 and npm 11.17.0. Use a supported Node.js
+runtime (`^22.18.0 || ^24.11.0 || >=26.0.0`) and install with `npm ci`.
+`package-lock.json` is the npm installation lockfile; `packageManager` also
+selects npm for Vite+ package-management commands. No global `vp` installation
+is required.
 
 ```sh
-npm run lint
-npm run typecheck
-npm test
-npm run build
+npm run check       # Vite+ lint/types, original Next.js ESLint checks, and tsc
+npm test            # All integration tests through Vite+'s bundled Vitest
+npm run build       # Next.js production build
+npm run dev         # Next.js development server on localhost:3000
 ```
+
+To use the local CLI directly:
+
+```sh
+npm exec -- vp check
+npm exec -- vp test run
+npm exec -- vp run build
+npm exec -- vp run dev
+npm exec -- vp run check
+```
+
+`vp run <task>` runs the matching project script. The built-in `vp dev` and
+`vp build` invoke Vite, so this Next.js app uses `vp run dev` and `vp run build`.
+A direct `vp build` fails with a missing `index.html`; Next.js App Router and
+Clerk still require the existing Next.js server and build pipeline.
+`vp test` invokes Vitest directly; add `run` for a single non-watching run.
+
+Test and Oxlint settings live in `vite.config.ts`. The edge-runtime test
+environment is preserved. ESLint remains enabled because the converter cannot
+fully reproduce the Next.js parser/resolver settings and several rules,
+including `@next/next/no-location-assign-relative-destination` and the React
+Compiler config/gating rules. `npm run check` includes both linters and the
+original TypeScript compiler. Oxlint currently reports nine non-blocking
+warnings in existing code (status markup, FormData string conversion, and the
+workflow test's deliberate Function constructor).
+
+Formatting is opt-in (`check.fmt: false`) to preserve the existing source
+layout. Use `npm run format -- <paths>` to format selected files, or
+`npm exec -- vp fmt --check <paths>` to check them. Generated Convex files,
+Next.js declarations, and agent skill directories are excluded.
+
+The migration generated `test.clearMocks: false` in both configs; after
+consolidating them into `vite.config.ts`, it was removed and all six tests
+passed unchanged with Vitest 5's default `clearMocks: true`. No compatibility
+settings remain. There are no configured browser, coverage, benchmark, or
+library packaging suites.
 
 The integration tests use Convex’s in-memory runtime and execute the checked-in n8n Code node source against real Convex HTTP handlers in that runtime. They cover public fields, RBAC, overlapping approvals, signature verification and replay, retries, pagination, and returns that race reminder delivery. The manual walkthrough exercises Clerk JWT exchange with your configured Clerk instance.
 

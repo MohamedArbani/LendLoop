@@ -19,20 +19,29 @@ export const send = internalAction({
       const timestamp = String(Date.now());
       const response = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-lendloop-timestamp": timestamp,
-          "x-lendloop-signature": await signature(secret, "request-event", timestamp, payload) },
+        headers: {
+          "content-type": "application/json",
+          "x-lendloop-timestamp": timestamp,
+          "x-lendloop-signature": await signature(secret, "request-event", timestamp, payload),
+        },
         body: JSON.stringify({ payload }),
         redirect: "error",
         signal: AbortSignal.timeout(15_000),
       });
-      if (!response.ok || !(await ctx.runQuery(internal.automation.getEvent, { eventId }))?.deliveredAt) {
+      if (
+        !response.ok ||
+        !(await ctx.runQuery(internal.automation.getEvent, { eventId }))?.deliveredAt
+      ) {
         throw new Error("The workflow did not confirm delivery.");
       }
     } catch {
       console.error("Request notification failed", { eventId, attempt });
       const delay = delays[attempt - 1];
       if (delay !== undefined) {
-        await ctx.scheduler.runAfter(delay, internal.dispatch.send, { eventId, attempt: attempt + 1 });
+        await ctx.scheduler.runAfter(delay, internal.dispatch.send, {
+          eventId,
+          attempt: attempt + 1,
+        });
       } else {
         await ctx.runMutation(internal.automation.markFailed, { eventId });
       }

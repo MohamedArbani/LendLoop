@@ -1,4 +1,11 @@
-export const categories = ["Power tools", "Garden", "Kitchen", "Camping", "Hand tools", "Other"] as const;
+export const categories = [
+  "Power tools",
+  "Garden",
+  "Kitchen",
+  "Camping",
+  "Hand tools",
+  "Other",
+] as const;
 export const conditions = ["Like new", "Good", "Well used"] as const;
 export type Category = (typeof categories)[number];
 export type Condition = (typeof conditions)[number];

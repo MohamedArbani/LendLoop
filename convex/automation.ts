@@ -14,12 +14,22 @@ export const markFailed = internalMutation({
   args: { eventId: v.id("events") },
   handler: async (ctx, { eventId }) => {
     const event = await ctx.db.get("events", eventId);
-    if (event && !event.deliveredAt) await ctx.db.patch("events", eventId, { failedAt: Date.now() });
+    if (event && !event.deliveredAt)
+      await ctx.db.patch("events", eventId, { failedAt: Date.now() });
   },
 });
 
-async function logNotification(ctx: MutationCtx, key: string, loan: Id<"loans">, recipient: Id<"members">, kind: Doc<"notifications">["kind"]) {
-  const existing = await ctx.db.query("notifications").withIndex("by_key", (q) => q.eq("key", key)).unique();
+async function logNotification(
+  ctx: MutationCtx,
+  key: string,
+  loan: Id<"loans">,
+  recipient: Id<"members">,
+  kind: Doc<"notifications">["kind"],
+) {
+  const existing = await ctx.db
+    .query("notifications")
+    .withIndex("by_key", (q) => q.eq("key", key))
+    .unique();
   if (existing) return;
   await ctx.db.insert("notifications", { key, loan, recipient, kind });
 }
@@ -28,7 +38,7 @@ export const deliverEvent = internalMutation({
   args: { eventId: v.string() },
   handler: async (ctx, { eventId }) => {
     const id = ctx.db.normalizeId("events", eventId);
-    const event = id && await ctx.db.get("events", id);
+    const event = id && (await ctx.db.get("events", id));
     if (!event) return { applied: false };
     if (event.deliveredAt) return { applied: true };
     await logNotification(ctx, "event:" + event._id, event.loan, event.recipient, event.kind);
@@ -41,7 +51,10 @@ export const overdue = internalQuery({
   args: { paginationOpts: paginationOptsValidator },
   handler: async (ctx, { paginationOpts }) => {
     const day = utcDay();
-    const result = await ctx.db.query("loans").withIndex("by_status_end", (q) => q.eq("status", "approved").lt("end", day)).paginate(paginationOpts);
+    const result = await ctx.db
+      .query("loans")
+      .withIndex("by_status_end", (q) => q.eq("status", "approved").lt("end", day))
+      .paginate(paginationOpts);
     return {
       loans: result.page.filter((loan) => loan.lastReminderDay !== day).map((loan) => loan._id),
       cursor: result.isDone ? null : result.continueCursor,
@@ -57,9 +70,16 @@ export const deliverReminder = internalMutation({
     let logged = 0;
     for (const loanId of new Set(loanIds)) {
       const id = ctx.db.normalizeId("loans", loanId);
-      const loan = id && await ctx.db.get("loans", id);
-      if (!loan || loan.status !== "approved" || loan.end >= day || loan.lastReminderDay === day) continue;
-      await logNotification(ctx, "reminder:" + loan._id + ":" + day, loan._id, loan.borrower, "overdue");
+      const loan = id && (await ctx.db.get("loans", id));
+      if (!loan || loan.status !== "approved" || loan.end >= day || loan.lastReminderDay === day)
+        continue;
+      await logNotification(
+        ctx,
+        "reminder:" + loan._id + ":" + day,
+        loan._id,
+        loan.borrower,
+        "overdue",
+      );
       await ctx.db.patch("loans", loan._id, { lastReminderDay: day });
       logged++;
     }

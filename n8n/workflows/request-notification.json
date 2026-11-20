@@ -14,10 +14,7 @@
       "name": "Request webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        0,
-        0
-      ],
+      "position": [0, 0],
       "webhookId": "946767cd-3005-5b5a-a97d-4a2048e80548"
     },
     {
@@ -28,10 +25,7 @@
       "name": "Verify request signature",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        240,
-        0
-      ]
+      "position": [240, 0]
     },
     {
       "parameters": {
@@ -62,10 +56,7 @@
       "name": "Authorized?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.4,
-      "position": [
-        480,
-        0
-      ]
+      "position": [480, 0]
     },
     {
       "parameters": {
@@ -75,10 +66,7 @@
       "name": "Sign event delivery",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        720,
-        -80
-      ]
+      "position": [720, -80]
     },
     {
       "parameters": {
@@ -114,10 +102,7 @@
       "name": "Log notification",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        960,
-        -80
-      ],
+      "position": [960, -80],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 1000
@@ -132,10 +117,7 @@
       "name": "Acknowledge",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
-      "position": [
-        1200,
-        -80
-      ]
+      "position": [1200, -80]
     },
     {
       "parameters": {
@@ -149,10 +131,7 @@
       "name": "Reject unsigned request",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
-      "position": [
-        720,
-        180
-      ]
+      "position": [720, 180]
     }
   ],
   "connections": {
