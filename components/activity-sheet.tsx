@@ -8,6 +8,7 @@ import {
   ProhibitIcon,
   XCircleIcon,
 } from "@phosphor-icons/react/dist/ssr";
+import { useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -29,16 +30,13 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import type { api } from "@/convex/_generated/api";
+import { api } from "@/convex/_generated/api";
 import { utcDay } from "@/lib/catalog";
-import { BoardEmpty } from "./board-states";
+import { BoardEmpty, BoardLoading } from "./board-states";
+import { ListPagination, useListPage } from "./list-pagination";
 import { RequestDetailsDialog } from "./request-details-dialog";
 
-type Notification = FunctionReturnType<typeof api.marketplace.inbox>[number];
-type MemberLoans = Pick<
-  FunctionReturnType<typeof api.marketplace.myLoans>,
-  "incoming" | "outgoing"
->;
+type Notification = FunctionReturnType<typeof api.marketplace.inbox>["page"][number];
 
 const events = {
   requested: { label: "New borrow request", icon: ArrowDownLeftIcon, tone: "pending" },
@@ -57,11 +55,21 @@ const eventDateTime = new Intl.DateTimeFormat("en-US", {
   timeZone: "UTC",
 });
 
-export function ActivitySheet({ inbox, loans }: { inbox: Notification[]; loans: MemberLoans }) {
-  const [selectedEntry, setSelectedEntry] = useState<Notification["id"] | null>(null);
-  const requests = new Map([...loans.incoming, ...loans.outgoing].map((loan) => [loan.id, loan]));
+export function ActivitySheet({ authenticated }: { authenticated: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [selectedEntry, setSelectedEntry] = useState<Notification | null>(null);
+  const navigation = useListPage("activity");
+  const { cursor, pageSize } = navigation;
+  const inbox = useQuery(
+    api.marketplace.inbox,
+    authenticated && open ? { cursor, pageSize } : "skip",
+  );
+  const loan = useQuery(
+    api.marketplace.loanDetails,
+    authenticated && selectedEntry ? { id: selectedEntry.loanId } : "skip",
+  );
   const days = new Map<string, Notification[]>();
-  for (const item of inbox) {
+  for (const item of inbox?.page ?? []) {
     const day = utcDay(item.at);
     const entries = days.get(day);
     if (entries) entries.push(item);
@@ -71,6 +79,7 @@ export function ActivitySheet({ inbox, loans }: { inbox: Notification[]; loans: 
   return (
     <Sheet
       onOpenChange={(open) => {
+        setOpen(open);
         if (!open) setSelectedEntry(null);
       }}
     >
@@ -95,7 +104,9 @@ export function ActivitySheet({ inbox, loans }: { inbox: Notification[]; loans: 
           <SheetDescription>Updates on your listings and loans. Times are in UTC.</SheetDescription>
         </SheetHeader>
         <div data-layout="activity-body">
-          {inbox.length === 0 ? (
+          {!inbox ? (
+            <BoardLoading label="Loading activity…" compact />
+          ) : inbox.page.length === 0 ? (
             <BoardEmpty
               icon={BellIcon}
               title="You’re all caught up"
@@ -129,9 +140,10 @@ export function ActivitySheet({ inbox, loans }: { inbox: Notification[]; loans: 
                           </ItemContent>
                           <ItemActions>
                             <RequestDetailsDialog
-                              loan={requests.get(entry.loanId)}
-                              open={selectedEntry === entry.id}
-                              onOpenChange={(open) => setSelectedEntry(open ? entry.id : null)}
+                              loan={selectedEntry?.id === entry.id ? loan : null}
+                              loading={selectedEntry?.id === entry.id && loan === undefined}
+                              open={selectedEntry?.id === entry.id}
+                              onOpenChange={(open) => setSelectedEntry(open ? entry : null)}
                               description={
                                 <>
                                   {label} ·{" "}
@@ -161,6 +173,7 @@ export function ActivitySheet({ inbox, loans }: { inbox: Notification[]; loans: 
               </section>
             ))
           )}
+          <ListPagination label="Activity pagination" navigation={navigation} result={inbox} />
         </div>
       </SheetContent>
     </Sheet>

@@ -15,7 +15,8 @@ export default defineSchema({
     archived: v.boolean(),
   })
     .index("by_archived", ["archived"])
-    .index("by_owner_archived", ["owner", "archived"]),
+    .index("by_owner_archived", ["owner", "archived"])
+    .index("by_archived_category", ["archived", "category"]),
   loans: defineTable({
     tool: v.id("tools"),
     lender: v.id("members"),
@@ -27,8 +28,17 @@ export default defineSchema({
   })
     .index("by_tool_status_end", ["tool", "status", "end"])
     .index("by_status_end", ["status", "end"])
+    .index("by_status_start", ["status", "start"])
+    .index("by_tool_status_start", ["tool", "status", "start"])
+    .index("by_lender_status", ["lender", "status"])
     .index("by_lender", ["lender"])
-    .index("by_borrower", ["borrower"]),
+    .index("by_borrower", ["borrower"])
+    .index("by_borrower_tool_start_end_status", ["borrower", "tool", "start", "end", "status"]),
+  bookingRequests: defineTable({
+    borrower: v.id("members"),
+    key: v.string(),
+    loan: v.id("loans"),
+  }).index("by_borrower_key", ["borrower", "key"]),
   events: defineTable({
     loan: v.id("loans"),
     recipient: v.id("members"),

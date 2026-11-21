@@ -5,7 +5,7 @@ function Empty({
   className,
   variant = "default",
   ...props
-}: React.ComponentProps<"div"> & { variant?: "default" | "board" }) {
+}: React.ComponentProps<"div"> & { variant?: "default" | "board" | "page" }) {
   return (
     <div
       data-slot="empty"
@@ -13,6 +13,13 @@ function Empty({
       className={cn(
         "flex w-full min-w-0 flex-1 flex-col items-center justify-center gap-4 rounded-xl border-dashed p-6 text-center text-balance",
         variant === "board" && "min-h-45 border border-border bg-muted/40",
+        variant === "page" && [
+          "grid gap-0 overflow-hidden rounded-3xl border border-solid border-border bg-card p-0 text-start shadow-sm md:grid-cols-2 md:items-stretch",
+          "[&_[data-slot=empty-header]]:max-w-none [&_[data-slot=empty-header]]:items-start [&_[data-slot=empty-header]]:gap-3",
+          "[&_[data-slot=empty-title]]:max-w-[13ch] [&_[data-slot=empty-title]]:text-3xl [&_[data-slot=empty-title]]:leading-none sm:[&_[data-slot=empty-title]]:text-4xl md:[&_[data-slot=empty-title]]:text-5xl",
+          "[&_[data-slot=empty-description]]:max-w-[36ch] [&_[data-slot=empty-description]]:text-base/relaxed",
+          "[&_[data-slot=empty-content]]:max-w-none [&_[data-slot=empty-content]]:flex-row [&_[data-slot=empty-content]]:flex-wrap [&_[data-slot=empty-content]]:justify-start",
+        ],
         className,
       )}
       {...props}
@@ -36,6 +43,8 @@ const emptyMediaVariants = cva(
     variants: {
       variant: {
         default: "bg-transparent",
+        illustration:
+          "relative isolate mb-0 min-h-52 items-stretch overflow-hidden md:order-last md:min-h-100",
         icon: "flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-foreground [&_svg:not([class*='size-'])]:size-4",
       },
     },
@@ -60,9 +69,13 @@ function EmptyMedia({
   );
 }
 
-function EmptyTitle({ className, ...props }: React.ComponentProps<"div">) {
+function EmptyTitle({
+  className,
+  as: Title = "div",
+  ...props
+}: React.ComponentProps<"div"> & { as?: "div" | "h1" }) {
   return (
-    <div
+    <Title
       data-slot="empty-title"
       className={cn("font-heading text-lg font-semibold tracking-tight", className)}
       {...props}

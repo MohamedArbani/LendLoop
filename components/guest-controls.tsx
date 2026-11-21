@@ -2,18 +2,20 @@
 
 import { ClerkProvider, SignInButton } from "@clerk/nextjs";
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr";
-import { ConvexProvider, ConvexReactClient, usePreloadedQuery } from "convex/react";
-import type { Preloaded } from "convex/react";
+import { ConvexProvider, ConvexReactClient, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import type { api } from "@/convex/_generated/api";
+import { api } from "@/convex/_generated/api";
+import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { ListPagination, useListPage } from "./list-pagination";
 import { PublicCatalog } from "./public-board";
 
 export function GuestSignIn() {
   return (
     <ClerkProvider>
       <SignInButton mode="modal" forceRedirectUrl="/dashboard" signUpForceRedirectUrl="/dashboard">
-        <Button size="touch">
+        <Button size="touch" id="guest-sign-in">
           Sign in <ArrowUpRightIcon data-icon="inline-end" aria-hidden />
         </Button>
       </SignInButton>
@@ -21,10 +23,22 @@ export function GuestSignIn() {
   );
 }
 
-type CatalogSnapshot = Preloaded<typeof api.marketplace.publicTools>;
+type CatalogSnapshot = FunctionReturnType<typeof api.marketplace.publicTools>;
 
 function CatalogSubscription({ initial }: { initial: CatalogSnapshot }) {
-  return <PublicCatalog tools={usePreloadedQuery(initial)} />;
+  const navigation = useListPage("public-catalog");
+  const { cursor, pageSize } = navigation;
+  const page =
+    useQuery(api.marketplace.publicTools, { cursor, pageSize }) ??
+    (cursor === null && pageSize === DEFAULT_PAGE_SIZE ? initial : undefined);
+  return (
+    <PublicCatalog
+      tools={page?.page}
+      pagination={
+        <ListPagination label="Tool library pagination" navigation={navigation} result={page} />
+      }
+    />
+  );
 }
 
 export function LivePublicCatalog({ initial }: { initial: CatalogSnapshot }) {

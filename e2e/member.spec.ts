@@ -4,7 +4,8 @@ import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwr
 import { expect, test as base } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { getFunctionName } from "convex/server";
-import { internal } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
+import { PAGE_SIZE_STORAGE_KEY } from "../lib/constants";
 import { utcDay } from "../lib/catalog";
 
 type TestMember = { id: string; emailAddress: string };
@@ -54,7 +55,9 @@ async function listTool(page: Page, name: string, description: string) {
 }
 
 async function openRequest(page: Page, name: string) {
-  await toolCard(page, name).getByRole("button", { name: "Request dates" }).click();
+  await toolCard(page, name)
+    .getByRole("button", { name: /^Request (future )?dates$/ })
+    .click();
   return page.getByRole("dialog", { name: `Request ${name}` });
 }
 
@@ -170,7 +173,7 @@ test("listing and loan changes reach other sessions and the guest catalog", asyn
     await signIn(borrower, await createMember());
     await setupClerkTestingToken({ page: guest });
     await guest.goto("/");
-    await expect(guest.getByRole("heading", { name: "Available to borrow" })).toBeVisible();
+    await expect(guest.getByRole("heading", { name: "Tool library" })).toBeVisible();
 
     const listButton = lender.getByRole("button", { name: "List a tool" });
     await listButton.click();
@@ -229,12 +232,16 @@ test("listing and loan changes reach other sessions and the guest catalog", asyn
     await lender.getByRole("tab", { name: "Incoming requests" }).click();
     await toolCard(lender, name).getByRole("button", { name: "Approve" }).click();
     await expect(toolCard(borrower, name)).toContainText("Approved");
-    await expect(toolCard(guest, name)).toHaveCount(0);
+    await expect(toolCard(guest, name)).toContainText("On loan");
+    await expect(toolCard(guest, name)).toContainText("Due back");
+    await expect(
+      toolCard(guest, name).getByRole("link", { name: "Sign in to request" }),
+    ).toBeVisible();
     await expectActivity(borrower, name, "Request approved", "Approved");
     await expect(toolCard(borrower, name)).toContainText("Notification logged");
     await toolCard(lender, name).getByRole("button", { name: "Mark returned" }).click();
     await expect(toolCard(borrower, name)).toContainText("Returned");
-    await expect(toolCard(guest, name)).toBeVisible();
+    await expect(toolCard(guest, name)).toContainText("Available now");
     await expectActivity(borrower, name, "Return recorded", "Returned");
     await expect(toolCard(borrower, name)).toContainText("Notification logged");
 
@@ -264,6 +271,198 @@ test("listing and loan changes reach other sessions and the guest catalog", asyn
   } finally {
     await borrowerContext.close();
     await guestContext.close();
+  }
+});
+
+test("future loans stay available now and the calendar blocks dates that cross a booking", async ({
+  page: lender,
+  browser,
+  baseURL,
+  createMember,
+}) => {
+  const borrowerContext = await browser.newContext({ baseURL });
+  const borrower = await borrowerContext.newPage();
+  const name = `E2E sander ${randomUUID().slice(0, 8)}`;
+  const description = "Includes <em>three sanding pads</em>.";
+  const today = utcDay();
+  const tomorrow = utcDay(Date.now() + 86_400_000);
+  const nextDay = utcDay(Date.now() + 2 * 86_400_000);
+  try {
+    await signIn(lender, await createMember());
+    await signIn(borrower, await createMember());
+    await listTool(lender, name, description);
+    await expect(toolCard(borrower, name).getByText(description, { exact: true })).toBeVisible();
+    await expect(toolCard(borrower, name).locator("em")).toHaveCount(0);
+    await sendRequest(borrower, name, tomorrow, tomorrow);
+    await lender.getByRole("tab", { name: "Incoming requests" }).click();
+    await toolCard(lender, name).getByRole("button", { name: "Approve" }).click();
+    await expect(toolCard(lender, name)).toContainText("Approved");
+    await expect(toolCard(lender, name).getByRole("button", { name: "Mark returned" })).toHaveCount(
+      0,
+    );
+    await expect(toolCard(borrower, name)).toContainText("Available now");
+
+    const dialog = await openRequest(borrower, name);
+    await dialog.getByRole("button", { name: /^First day / }).click();
+    const first = borrower.getByRole("dialog", { name: "First day calendar" });
+    await expect(first.locator(`[data-day="${tomorrow}"] button`)).toBeDisabled();
+    await borrower.keyboard.press("Escape");
+    await pickRequestDay(borrower, "First day", today);
+    await dialog.getByRole("button", { name: /^Return by / }).click();
+    const last = borrower.getByRole("dialog", { name: "Return by calendar" });
+    await expect(last.locator(`[data-day="${tomorrow}"] button`)).toBeDisabled();
+    await expect(last.locator(`[data-day="${nextDay}"] button`)).toBeDisabled();
+    await expect(last.locator(`[data-day="${today}"] button`)).toBeEnabled();
+    await borrower.keyboard.press("Escape");
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await sendRequest(borrower, name, nextDay, nextDay);
+    await borrower.getByRole("tab", { name: "My requests" }).click();
+    await expect(toolCard(borrower, name).filter({ hasText: "Pending" })).toHaveCount(1);
+
+    await lender.getByRole("tab", { name: "My listings" }).click();
+    await toolCard(lender, name).getByRole("button", { name: "Remove", exact: true }).click();
+    await lender.getByRole("alertdialog").getByRole("button", { name: "Remove listing" }).click();
+    await expect(toolCard(lender, name)).toHaveCount(0);
+  } finally {
+    await borrowerContext.close();
+  }
+});
+
+async function mutateFixtures(page: Page, path: string, entries: Record<string, string>[]) {
+  return page.evaluate(
+    async ({ url, path, entries }) => {
+      const token = await window.Clerk.session?.getToken({ template: "convex" });
+      if (!token) throw new Error("Missing authenticated fixture session.");
+      const ids: string[] = [];
+      for (const entry of entries) {
+        const response = await fetch(new URL("/api/mutation", url), {
+          method: "POST",
+          signal: AbortSignal.timeout(10_000),
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ path, args: [entry], format: "convex_encoded_json" }),
+        });
+        const result = await response.json();
+        if (!response.ok || result.status !== "success") throw new Error(`Fixture failed: ${path}`);
+        if (typeof result.value === "string") ids.push(result.value);
+      }
+      return ids;
+    },
+    { url: process.env.NEXT_PUBLIC_CONVEX_URL!, path, entries },
+  );
+}
+
+test("paginates listings, requests and Activity with a shared browser preference", async ({
+  page: lender,
+  browser,
+  baseURL,
+  createMember,
+}) => {
+  test.setTimeout(120_000);
+  const borrowerContext = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 844 },
+  });
+  const borrower = await borrowerContext.newPage();
+  const prefix = `E2E Page ${randomUUID().slice(0, 8)}`;
+  const fixtures = Array.from({ length: 11 }, (_, index) => ({
+    name: `${prefix} ${index}`,
+    category: "Garden",
+    condition: "Good",
+    description: "Tool for the pagination test.",
+  }));
+  const tools: string[] = [];
+  try {
+    await signIn(lender, await createMember());
+    await lender.getByRole("tab", { name: "My listings" }).click();
+    const own = lender.getByRole("navigation", { name: "My listings pagination" });
+    const save = getFunctionName(api.marketplace.save);
+    const ownedCards = lender
+      .getByRole("tabpanel")
+      .getByRole("heading", { name: new RegExp(prefix) });
+    tools.push(...(await mutateFixtures(lender, save, fixtures.slice(0, 9))));
+    await expect(ownedCards).toHaveCount(9);
+    await expect(own).toHaveCount(0);
+    tools.push(...(await mutateFixtures(lender, save, fixtures.slice(9, 10))));
+    await expect(ownedCards).toHaveCount(10);
+    await expect(own).toBeVisible();
+    await expect(own.getByRole("button", { name: "Next page" })).toBeDisabled();
+    tools.push(...(await mutateFixtures(lender, save, fixtures.slice(10))));
+    const nextOwn = own.getByRole("button", { name: "Next page" });
+    await expect(nextOwn).toBeEnabled();
+    await expect(ownedCards).toHaveCount(10);
+    await nextOwn.click();
+    await expect(ownedCards).toHaveCount(1);
+    await expect(ownedCards.first()).toHaveText(fixtures[0].name);
+    await own.getByRole("button", { name: "Previous page" }).click();
+    await expect(ownedCards).toHaveCount(10);
+
+    await borrower.goto("/");
+    const guest = borrower.getByRole("navigation", { name: "Tool library pagination" });
+    await guest.getByRole("combobox", { name: "Items per page" }).click();
+    await expect(borrower.getByRole("option", { name: /^(10|25|50|100) per page$/ })).toHaveCount(4);
+    await borrower.getByRole("option", { name: "25 per page" }).click();
+    await expect(guest.getByRole("combobox")).toContainText("25 per page");
+    expect(await borrower.evaluate((key) => localStorage.getItem(key), PAGE_SIZE_STORAGE_KEY)).toBe(
+      "25",
+    );
+    await borrower.reload();
+    await expect(guest.getByRole("combobox")).toContainText("25 per page");
+
+    await signIn(borrower, await createMember());
+    await borrower.getByRole("combobox", { name: "Category" }).click();
+    await borrower.getByRole("option", { name: "Garden" }).click();
+    await expect(
+      borrower.getByRole("navigation", { name: "Explore pagination" }).getByRole("combobox"),
+    ).toContainText("25 per page");
+    const day = utcDay();
+    await mutateFixtures(
+      borrower,
+      getFunctionName(api.marketplace.request),
+      tools.map((tool) => ({
+        tool,
+        start: day,
+        end: day,
+        idempotencyKey: randomUUID(),
+      })),
+    );
+    await borrower.getByRole("tab", { name: "My requests" }).click();
+    const outgoing = borrower.getByRole("navigation", { name: "My requests pagination" });
+    await expect(outgoing.getByRole("combobox")).toContainText("25 per page");
+    await expect(
+      borrower.getByRole("tabpanel").getByRole("heading", {
+        name: new RegExp(prefix),
+      }),
+    ).toHaveCount(11);
+
+    await lender.getByRole("tab", { name: "Incoming requests" }).click();
+    const incoming = lender.getByRole("navigation", { name: "Incoming requests pagination" });
+    await incoming.getByRole("button", { name: "Next page" }).click();
+    await expect(toolCard(lender, fixtures[0].name)).toBeVisible();
+    await lender.getByRole("button", { name: "Activity" }).click();
+    const activity = lender.getByRole("dialog", { name: "Activity" });
+    const activityPager = activity.getByRole("navigation", { name: "Activity pagination" });
+    await expect(activityPager.getByRole("button", { name: "Next page" })).toBeEnabled();
+    await activityPager.getByRole("button", { name: "Next page" }).click();
+    await activity
+      .getByRole("button", { name: /view request details.*new borrow request/i })
+      .click();
+    const details = lender.getByRole("dialog", { name: "Request details" });
+    await expect(details.getByText("Pending", { exact: true })).toBeVisible();
+    await details.getByRole("button", { name: "Close", exact: true }).click();
+    await activityPager.getByRole("combobox").click();
+    await lender.getByRole("option", { name: "50 per page" }).click();
+    await expect(activityPager.getByRole("combobox")).toContainText("50 per page");
+    await lender.keyboard.press("Escape");
+    await expect(incoming.getByRole("combobox")).toContainText("50 per page");
+    await expect(incoming.getByText("Page 1")).toBeVisible();
+  } finally {
+    if (tools.length && !lender.isClosed())
+      await mutateFixtures(
+        lender,
+        getFunctionName(api.marketplace.remove),
+        tools.map((id) => ({ id })),
+      );
+    await borrowerContext.close();
   }
 });
 

@@ -9,10 +9,11 @@ import {
   ShieldCheckIcon,
   ToolboxIcon,
 } from "@phosphor-icons/react/dist/ssr";
-import { useMutation } from "convex/react";
+import { useMutation, useQueries, useQuery } from "convex/react";
+import type { RequestForQueries } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { ConvexError } from "convex/values";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 import {
@@ -24,6 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,16 +52,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { categories, conditions, utcDay } from "@/lib/catalog";
+import { categories, conditions, overlapsBooking, utcDay } from "@/lib/catalog";
 import type { Category, Condition } from "@/lib/catalog";
-import { BoardEmpty } from "./board-states";
+import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { BoardEmpty, BoardLoading } from "./board-states";
 import { DatePickerField } from "./date-picker-field";
 import { ActivitySheet } from "./activity-sheet";
+import { ListPagination, useListPage } from "./list-pagination";
 import { LoanCard } from "./loan-card";
 import { ToolCard } from "./tool-card";
 
-type Tool = FunctionReturnType<typeof api.marketplace.board>[number];
-type Loan = FunctionReturnType<typeof api.marketplace.myLoans>["incoming"][number];
+type Tool = FunctionReturnType<typeof api.marketplace.board>["page"][number];
+type Loan = FunctionReturnType<typeof api.marketplace.myLoans>["page"][number];
 type Modal = { type: "listing"; tool?: Tool } | { type: "request" | "remove"; tool: Tool };
 
 const views = [
@@ -97,14 +101,14 @@ function CatalogSelect({ id, options, ...props }: CatalogSelectProps) {
 
 export function Dashboard({
   admin,
-  tools,
-  loans,
-  inbox,
+  initialTools,
+  stats: overview,
+  authenticated,
 }: {
   admin: boolean;
-  tools: FunctionReturnType<typeof api.marketplace.board>;
-  loans: FunctionReturnType<typeof api.marketplace.myLoans>;
-  inbox: FunctionReturnType<typeof api.marketplace.inbox>;
+  initialTools: FunctionReturnType<typeof api.marketplace.board>;
+  stats: FunctionReturnType<typeof api.marketplace.boardStats>;
+  authenticated: boolean;
 }) {
   const save = useMutation(api.marketplace.save);
   const remove = useMutation(api.marketplace.remove);
@@ -118,43 +122,95 @@ export function Dashboard({
   const dialogTrigger = useRef<HTMLElement>(null);
   const listButton = useRef<HTMLButtonElement>(null);
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+  const requestKey = useRef<{ tool: Id<"tools">; start: string; end: string; key: string }>(null);
+  const [requestError, setRequestError] = useState("");
+  const [approving, setApproving] = useState<Id<"loans">>();
   const [startDay, setStartDay] = useState("");
   const [endDay, setEndDay] = useState("");
-  const today = modal?.type === "request" ? utcDay() : "";
-  const requestDatesReady = startDay >= today && endDay >= startDay;
-
-  const visibleTools = tools.filter((tool) =>
-    tab === "My listings" ? tool.mine : category === "All categories" || tool.category === category,
+  const requestTool = modalOpen && modal?.type === "request" ? modal.tool.id : null;
+  const scheduleQuery = useMemo((): RequestForQueries => {
+    if (!requestTool) return {};
+    return {
+      availability: { query: api.marketplace.bookingAvailability, args: { tool: requestTool } },
+    };
+  }, [requestTool]);
+  const { availability } = useQueries(scheduleQuery) as {
+    availability:
+      | FunctionReturnType<typeof api.marketplace.bookingAvailability>
+      | Error
+      | undefined;
+  };
+  const schedule = availability instanceof Error ? null : availability;
+  const today = schedule?.today ?? "";
+  const blocked = (start: string, end = start) =>
+    schedule ? overlapsBooking(schedule.ranges, start, end) : true;
+  const startBlocked = Boolean(startDay && blocked(startDay));
+  const rangeBlocked = startBlocked || Boolean(startDay && endDay && blocked(startDay, endDay));
+  const requestDatesReady = Boolean(
+    schedule && startDay && endDay && startDay >= today && endDay >= startDay && !rangeBlocked,
   );
-  const visibleLoans =
-    tab === "My requests"
-      ? loans.outgoing
-      : tab === "Incoming requests"
-        ? loans.incoming
-        : loans.all;
+
+  const navigation = useListPage(tab === "Explore" ? tab + ":" + category : tab);
+  const { pageSize, cursor } = navigation;
+  const showingTools = tab === "Explore" || tab === "My listings";
+  const filteredCategory =
+    tab === "Explore" && category !== "All categories" ? category : undefined;
+  const tools =
+    useQuery(
+      api.marketplace.board,
+      authenticated && showingTools
+        ? { pageSize, cursor, own: tab === "My listings", category: filteredCategory }
+        : "skip",
+    ) ??
+    (tab === "Explore" && !filteredCategory && cursor === null && pageSize === DEFAULT_PAGE_SIZE
+      ? initialTools
+      : undefined);
+  const loans = useQuery(
+    api.marketplace.myLoans,
+    authenticated && !showingTools
+      ? {
+          pageSize,
+          cursor,
+          view:
+            tab === "My requests" ? "outgoing" : tab === "Incoming requests" ? "incoming" : "all",
+        }
+      : "skip",
+  );
+  const visibleTools = tools?.page;
+  const visibleLoans = loans?.page;
 
   function open(next: Modal, trigger: HTMLElement) {
     dialogTrigger.current = trigger;
+    setRequestError("");
     setStartDay("");
     setEndDay("");
     setModal(next);
     setModalOpen(true);
   }
 
-  async function execute(operation: () => Promise<unknown>, message: string) {
+  async function execute(
+    operation: () => Promise<unknown>,
+    message: string,
+    reportError: (error: string) => void = toast.error,
+  ) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await operation();
       setModalOpen(false);
       toast.success(message);
     } catch (caught) {
-      toast.error(
+      reportError(
         caught instanceof ConvexError && typeof caught.data === "string"
           ? caught.data
           : "Something went wrong. Please try again.",
       );
     } finally {
+      inFlight.current = false;
       setBusy(false);
+      setApproving(undefined);
     }
   }
 
@@ -192,18 +248,22 @@ export function Dashboard({
         modal.tool ? "Listing updated." : "Tool listed.",
       );
     } else if (modal?.type === "request") {
-      if (startDay < utcDay() || endDay < startDay) {
-        toast.error("Choose a valid date range.");
-        return;
-      }
+      if (!requestDatesReady || inFlight.current) return;
+      const previous = requestKey.current;
+      const tool = modal.tool.id;
+      const key =
+        previous?.tool === tool && previous.start === startDay && previous.end === endDay
+          ? previous.key
+          : crypto.randomUUID();
+      requestKey.current = { tool, start: startDay, end: endDay, key };
+      setRequestError("");
       void execute(
-        () =>
-          request({
-            tool: modal.tool.id,
-            start: startDay,
-            end: endDay,
-          }),
+        async () => {
+          await request({ tool, start: startDay, end: endDay, idempotencyKey: key });
+          requestKey.current = null;
+        },
         "Request submitted.",
+        setRequestError,
       );
     }
   }
@@ -230,8 +290,11 @@ export function Dashboard({
     const lender = tab === "All loans" ? loan.lender : null;
     if (!(canReview || canReturn || canCancel || lender)) return null;
 
-    const change = (status: "approved" | "declined" | "cancelled" | "returned") =>
+    function change(status: "approved" | "declined" | "cancelled" | "returned") {
+      if (inFlight.current) return;
+      if (status === "approved") setApproving(loan.id);
       void execute(() => transition({ id: loan.id, status }), "Request " + status + ".");
+    }
 
     return (
       <div data-layout="actions">
@@ -242,7 +305,7 @@ export function Dashboard({
               disabled={busy || loan.end < utcDay()}
               onClick={() => change("approved")}
             >
-              Approve
+              {approving === loan.id ? "Approving…" : "Approve"}
             </Button>
             <Button
               size="action"
@@ -277,15 +340,15 @@ export function Dashboard({
   const availableViews = admin ? views : views.slice(0, -1);
   const stats = [
     {
-      label: "Available tools",
+      label: "Available now",
       icon: ToolboxIcon,
-      count: tools.filter((tool) => tool.available).length,
+      count: overview?.available ?? "—",
     },
-    { label: "Your listings", icon: CompassIcon, count: tools.filter((tool) => tool.mine).length },
+    { label: "Your listings", icon: CompassIcon, count: overview?.listings ?? "—" },
     {
       label: "Incoming requests",
       icon: CalendarBlankIcon,
-      count: loans.incoming.filter((loan) => loan.status === "pending").length,
+      count: overview?.incoming ?? "—",
     },
   ];
 
@@ -297,7 +360,7 @@ export function Dashboard({
           <p>Find a tool, manage a listing, or keep track of what you’ve borrowed.</p>
         </div>
         <div data-layout="actions">
-          <ActivitySheet inbox={inbox} loans={loans} />
+          <ActivitySheet authenticated={authenticated} />
           <Button
             ref={listButton}
             size="touch"
@@ -345,9 +408,9 @@ export function Dashboard({
                     <div data-layout="heading">
                       <div data-layout="section-title">
                         <h2>{tab === "Explore" ? "Tool library" : "Your listings"}</h2>
-                        <Badge variant="outline">
-                          {visibleTools.length} {visibleTools.length === 1 ? "listing" : "listings"}
-                        </Badge>
+                        {visibleTools && (
+                          <Badge variant="outline">{visibleTools.length} on this page</Badge>
+                        )}
                       </div>
                       <p>
                         {tab === "Explore"
@@ -370,7 +433,9 @@ export function Dashboard({
                     )}
                   </div>
 
-                  {visibleTools.length === 0 ? (
+                  {!visibleTools ? (
+                    <BoardLoading label="Loading tools…" />
+                  ) : visibleTools.length === 0 ? (
                     <BoardEmpty
                       title="No listings in this view"
                       description={
@@ -398,7 +463,11 @@ export function Dashboard({
                                     )
                                   }
                                 >
-                                  {tool.mine ? "Edit listing" : "Request dates"}
+                                  {tool.mine
+                                    ? "Edit listing"
+                                    : tool.available
+                                      ? "Request dates"
+                                      : "Request future dates"}
                                 </Button>
                                 {tool.lender && trustAction(tool.lender, tool.trusted)}
                                 {(tool.mine || admin) && (
@@ -426,9 +495,9 @@ export function Dashboard({
                   <div data-layout="heading">
                     <div data-layout="section-title">
                       <h2>{tab}</h2>
-                      <Badge variant="outline">
-                        {visibleLoans.length} {visibleLoans.length === 1 ? "request" : "requests"}
-                      </Badge>
+                      {visibleLoans && (
+                        <Badge variant="outline">{visibleLoans.length} on this page</Badge>
+                      )}
                     </div>
                     <p>
                       {tab === "My requests"
@@ -438,7 +507,9 @@ export function Dashboard({
                           : "Review loan history across the neighborhood."}
                     </p>
                   </div>
-                  {visibleLoans.length === 0 ? (
+                  {!visibleLoans ? (
+                    <BoardLoading label="Loading requests…" />
+                  ) : visibleLoans.length === 0 ? (
                     <BoardEmpty
                       icon={tab === "My requests" ? ArrowUpRightIcon : ArrowDownLeftIcon}
                       title="No requests yet"
@@ -459,6 +530,13 @@ export function Dashboard({
                   )}
                 </>
               ))}
+            {tab === label && (
+              <ListPagination
+                label={tab + " pagination"}
+                navigation={navigation}
+                result={showingTools ? tools : loans}
+              />
+            )}
           </TabsContent>
         ))}
       </Tabs>
@@ -583,26 +661,64 @@ export function Dashboard({
                         />
                       </Field>
                     </>
+                  ) : availability === undefined ? (
+                    <BoardLoading label="Checking availability…" compact />
+                  ) : !schedule ? (
+                    <Alert variant={availability instanceof Error ? "destructive" : "warning"}>
+                      <AlertDescription>
+                        {availability instanceof Error
+                          ? "Couldn’t check availability. Close the request and try again."
+                          : "This tool is no longer available to request."}
+                      </AlertDescription>
+                    </Alert>
                   ) : (
-                    <div data-layout="form-row">
-                      <DatePickerField
-                        label="First day"
-                        value={startDay}
-                        min={today}
-                        disabled={busy}
-                        onChange={(day) => {
-                          setStartDay(day);
-                          if (endDay < day) setEndDay("");
-                        }}
-                      />
-                      <DatePickerField
-                        label="Return by"
-                        value={endDay}
-                        min={startDay >= today ? startDay : today}
-                        disabled={busy}
-                        onChange={setEndDay}
-                      />
-                    </div>
+                    <>
+                      {schedule.overdue && (
+                        <Alert variant="warning">
+                          <AlertDescription>
+                            The return date is uncertain. Future requests can be approved after the
+                            tool is returned.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      <div data-layout="form-row">
+                        <DatePickerField
+                          label="First day"
+                          value={startDay}
+                          min={today}
+                          today={today}
+                          disabled={busy}
+                          isBlocked={(day) => blocked(day)}
+                          onChange={(day) => {
+                            setRequestError("");
+                            setStartDay(day);
+                            if (endDay < day || blocked(day, endDay)) setEndDay("");
+                          }}
+                        />
+                        <DatePickerField
+                          label="Return by"
+                          value={endDay}
+                          min={startDay >= today ? startDay : today}
+                          today={today}
+                          disabled={busy || !startDay || startBlocked}
+                          isBlocked={(day) => blocked(startDay, day)}
+                          onChange={(day) => {
+                            setRequestError("");
+                            setEndDay(day);
+                          }}
+                        />
+                      </div>
+                      {(requestError || rangeBlocked || (startDay && startDay < today)) && (
+                        <Alert variant="destructive">
+                          <AlertDescription>
+                            {requestError ||
+                              (rangeBlocked
+                                ? "These dates are no longer available. Choose a different range."
+                                : "Choose a first day starting today or later.")}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                    </>
                   )}
                 </FieldGroup>
                 <DialogFooter>
@@ -621,7 +737,13 @@ export function Dashboard({
                     disabled={busy || (modal.type === "request" && !requestDatesReady)}
                   >
                     {busy && <Spinner data-icon="inline-start" />}
-                    {busy ? "Saving…" : modal.type === "listing" ? "Save listing" : "Send request"}
+                    {modal.type === "listing"
+                      ? busy
+                        ? "Saving…"
+                        : "Save listing"
+                      : busy
+                        ? "Sending…"
+                        : "Send request"}
                   </Button>
                 </DialogFooter>
               </form>

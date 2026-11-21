@@ -1,13 +1,14 @@
 import { ArrowDownIcon, ArrowUpRightIcon, WrenchIcon } from "@phosphor-icons/react/dist/ssr";
 import Image from "next/image";
-import Link from "next/link";
 import type { ReactNode } from "react";
-import type { Category } from "@/lib/catalog";
+import type { FunctionReturnType } from "convex/server";
+import type { api } from "@/convex/_generated/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { BoardEmpty, BoardLoading } from "./board-states";
+import { BrandLogo } from "./brand-logo";
 import { ThemeToggle } from "./theme-toggle";
 import { ToolCard } from "./tool-card";
 
@@ -23,14 +24,7 @@ export function Header({
   return (
     <header data-layout="site-header">
       <div data-layout="header-inner">
-        <Button asChild variant="brand">
-          <Link href={href}>
-            <Badge variant="brandIcon">
-              <WrenchIcon weight="bold" aria-hidden />
-            </Badge>
-            LendLoop
-          </Link>
-        </Button>
+        <BrandLogo href={href} />
         <div data-layout="actions">
           {catalog && (
             <Button asChild variant="ghost">
@@ -101,22 +95,28 @@ export function PublicBoard({ signIn, catalog }: { signIn?: ReactNode; catalog: 
 export function PublicCatalog({
   tools,
   notice,
+  pagination,
 }: {
-  tools?: { name: string; category: Category }[];
+  tools?: FunctionReturnType<typeof api.marketplace.publicTools>["page"];
+  pagination?: ReactNode;
   notice?: string;
 }) {
   return (
     <section id="tool-board" aria-labelledby="public-heading" data-layout="section" data-enter>
       <div data-layout="section-heading">
         <div data-layout="heading">
-          <h2 id="public-heading">Available to borrow</h2>
+          <h2 id="public-heading">Tool library</h2>
           <p>Find a tool for your next project.</p>
         </div>
-        {tools && <Badge variant="outline">{tools.length} available</Badge>}
+        {tools && (
+          <Badge variant="outline">
+            {tools.filter((tool) => tool.available).length} available on this page
+          </Badge>
+        )}
       </div>
       <Separator />
       {notice ? (
-        <Alert role={undefined}>
+        <Alert variant="info">
           <AlertTitle>The tool board is offline</AlertTitle>
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
@@ -131,11 +131,19 @@ export function PublicCatalog({
         <ul data-layout="catalog-grid">
           {tools.map((tool, index) => (
             <li key={`${tool.category}-${tool.name}-${index}`}>
-              <ToolCard tool={tool} />
+              <ToolCard
+                tool={tool}
+                actions={
+                  <Button asChild variant="outline" size="action">
+                    <a href="#guest-sign-in">Sign in to request</a>
+                  </Button>
+                }
+              />
             </li>
           ))}
         </ul>
       )}
+      {pagination}
     </section>
   );
 }

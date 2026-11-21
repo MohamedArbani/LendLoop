@@ -1,44 +1,72 @@
-import * as React from "react";
-import { cva, type VariantProps } from "class-variance-authority";
+import {
+  CheckCircleIcon,
+  InfoIcon,
+  WarningCircleIcon,
+  WarningIcon,
+} from "@phosphor-icons/react/dist/ssr";
+import { cva } from "class-variance-authority";
 import { cn } from "cn";
+import type { ComponentProps } from "react";
 
 const alertVariants = cva(
-  "group/alert relative grid w-full gap-1 rounded-xl border px-4 py-3 text-left text-sm/relaxed has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-1.5 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-3.5",
+  "grid w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-0.5 rounded-2xl border border-(--alert-border) bg-(--alert-surface) px-4 py-3.5 text-left text-sm/relaxed text-card-foreground sm:has-data-[slot=alert-action]:grid-cols-[auto_minmax(0,1fr)_auto]",
   {
     variants: {
       variant: {
-        default: "bg-card text-card-foreground",
-        destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+        default: "[--alert-accent:var(--muted-foreground)]",
+        destructive: "[--alert-accent:var(--alert-error)]",
+        info: "[--alert-accent:var(--alert-info)]",
+        warning: "[--alert-accent:var(--status-pending-foreground)]",
+        success: "[--alert-accent:var(--status-success-foreground)]",
       },
-    },
-    defaultVariants: {
-      variant: "default",
     },
   },
 );
 
+const alertIcons = {
+  default: InfoIcon,
+  destructive: WarningCircleIcon,
+  info: InfoIcon,
+  warning: WarningIcon,
+  success: CheckCircleIcon,
+};
+
 function Alert({
   className,
-  variant,
+  variant = "default",
+  children,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
+}: ComponentProps<"div"> & {
+  variant?: keyof typeof alertIcons;
+}) {
+  const Icon = alertIcons[variant];
+
   return (
     <div
       data-slot="alert"
-      role="alert"
+      data-variant={variant}
+      role={variant === "destructive" ? "alert" : undefined}
       className={cn(alertVariants({ variant }), className)}
       {...props}
-    />
+    >
+      <span
+        data-slot="alert-icon"
+        className="col-start-1 row-span-2 row-start-1 grid size-9 shrink-0 place-items-center rounded-lg bg-(--alert-icon-surface) text-(--alert-accent) [&>svg]:size-5"
+        aria-hidden
+      >
+        <Icon weight="bold" />
+      </span>
+      {children}
+    </div>
   );
 }
 
-function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
+function AlertTitle({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-title"
       className={cn(
-        "font-medium group-has-[>svg]/alert:col-start-2 [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground",
+        "col-start-2 font-heading text-base/relaxed font-semibold [&_a]:underline [&_a]:underline-offset-3",
         className,
       )}
       {...props}
@@ -46,12 +74,12 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-function AlertDescription({ className, ...props }: React.ComponentProps<"div">) {
+function AlertDescription({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-description"
       className={cn(
-        "text-sm/relaxed text-balance text-muted-foreground md:text-pretty [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground [&_p:not(:last-child)]:mb-4",
+        "col-start-2 self-center text-sm/relaxed text-muted-foreground wrap-anywhere [&_a]:underline [&_a]:underline-offset-3 [&_p:not(:last-child)]:mb-3",
         className,
       )}
       {...props}
@@ -59,11 +87,14 @@ function AlertDescription({ className, ...props }: React.ComponentProps<"div">) 
   );
 }
 
-function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
+function AlertAction({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-action"
-      className={cn("absolute top-1.5 right-2", className)}
+      className={cn(
+        "col-start-2 mt-2 justify-self-start sm:col-start-3 sm:row-span-2 sm:row-start-1 sm:mt-0 sm:ml-2 sm:self-center",
+        className,
+      )}
       {...props}
     />
   );

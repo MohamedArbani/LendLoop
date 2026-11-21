@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/card";
 import type { api } from "@/convex/_generated/api";
 
-type Loan = FunctionReturnType<typeof api.marketplace.myLoans>["incoming"][number];
+type Loan = FunctionReturnType<typeof api.marketplace.myLoans>["page"][number];
 
 const statuses = {
   pending: { label: "Pending", variant: "pending", icon: ClockIcon },

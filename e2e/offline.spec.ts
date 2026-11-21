@@ -19,7 +19,7 @@ test("renders the public landing page without service credentials", async ({ pag
 test("keeps the dashboard behind the public entry point without services", async ({ page }) => {
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "Available to borrow" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tool library" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Neighborhood board" })).toHaveCount(0);
 });
 
@@ -49,4 +49,24 @@ test("follows the system theme by default and remembers explicit choices", async
   await expect(root).toHaveClass(/\blight\b/);
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(root).toHaveClass(/\bdark\b/);
+});
+
+test("shows a branded 404 with working back and home actions", async ({ page, request }) => {
+  const missing = "/tools/missing-workbench";
+  expect((await request.get(missing)).status()).toBe(404);
+
+  await page.goto(missing);
+  await expect(page.getByRole("heading", { name: "We couldn’t find that page." })).toBeVisible();
+  await expect(page.getByRole("link", { name: "LendLoop" })).toHaveAttribute("href", "/");
+  await page.getByRole("button", { name: "Go back" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  await page.goto("/?from=404");
+  await page.goto(missing);
+  await page.getByRole("button", { name: "Go back" }).press("Enter");
+  await expect(page).toHaveURL(/\?from=404$/);
+
+  await page.goto(missing);
+  await page.getByRole("link", { name: "Back to home" }).click();
+  await expect(page).toHaveURL(/\/$/);
 });

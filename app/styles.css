@@ -22,6 +22,8 @@
   --accent: oklch(0.94 0.023 150);
   --accent-foreground: oklch(0.228 0.013 107.4);
   --destructive: oklch(0.577 0.245 27.325);
+  --alert-error: oklch(0.49 0.19 25);
+  --alert-info: oklch(0.46 0.12 250);
   --border: oklch(0.93 0.007 106.5);
   --input: oklch(0.93 0.007 106.5);
   --ring: oklch(0.737 0.021 106.9);
@@ -57,6 +59,8 @@
   --accent: oklch(0.286 0.016 107.4);
   --accent-foreground: oklch(0.988 0.003 106.5);
   --destructive: oklch(0.704 0.191 22.216);
+  --alert-error: oklch(0.79 0.125 24);
+  --alert-info: oklch(0.8 0.12 248);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.58 0.031 107.3);
@@ -179,6 +183,16 @@
 }
 
 @layer components {
+  [data-slot="alert"] {
+    --alert-surface: color-mix(in oklab, var(--alert-accent) 9%, var(--card));
+    --alert-border: color-mix(in oklab, var(--alert-accent) 31%, var(--card));
+    --alert-icon-surface: color-mix(in oklab, var(--alert-accent) 17%, var(--card));
+  }
+
+  [data-slot="alert"]:not(:has([data-slot="alert-title"])) [data-slot="alert-description"] {
+    grid-row: 1 / span 2;
+  }
+
   [data-layout="header-inner"],
   [data-layout="footer-inner"],
   [data-layout="page"] {
@@ -434,6 +448,49 @@
 
   [data-layout="activity-day"] [data-slot="item-title"] {
     @apply line-clamp-none text-sm font-semibold wrap-anywhere;
+  }
+
+  [data-layout="missing-page"] {
+    @apply mx-auto grid min-h-[calc(100svh-4rem)] max-w-270 items-center py-6 md:py-12;
+    width: calc(100% - var(--page-gutter) * 2);
+  }
+
+  [data-layout="missing-copy"] {
+    @apply flex min-w-0 flex-col justify-center gap-6 px-5 py-7 sm:px-8 md:px-12 md:py-12;
+  }
+
+  [data-layout="missing-art"] {
+    @apply relative grid w-full place-items-center px-4 pt-2 pb-5;
+    color: var(--hero-heading);
+    background:
+      radial-gradient(
+          circle,
+          color-mix(in oklab, currentColor 20%, transparent) 1px,
+          transparent 1.6px
+        )
+        center / 18px 18px,
+      var(--hero);
+  }
+
+  [data-layout="missing-art"]::before {
+    @apply pointer-events-none absolute inset-3 rounded-2xl border sm:inset-5;
+    border-color: color-mix(in oklab, currentColor 23%, transparent);
+    content: "";
+  }
+
+  [data-layout="missing-number"] {
+    @apply relative font-heading leading-none font-bold tabular-nums;
+    font-size: clamp(5rem, 16vw, 11rem);
+    letter-spacing: -0.065em;
+    padding-inline-end: 0.065em;
+  }
+
+  [data-layout="missing-icon"] {
+    @apply absolute end-[16%] bottom-[15%] grid size-12 rotate-12 place-items-center rounded-xl border border-border bg-card text-primary shadow-md sm:size-16 md:size-20;
+  }
+
+  [data-layout="missing-icon"] svg {
+    @apply size-[55%];
   }
 
   [data-layout="site-footer"] {

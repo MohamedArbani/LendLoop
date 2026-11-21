@@ -7,6 +7,7 @@ import { BoardLoading } from "@/components/board-states";
 import { MemberBoard } from "@/components/member-board";
 import { Header } from "@/components/public-board";
 import { api } from "@/convex/_generated/api";
+import { FIRST_PAGE } from "@/lib/constants";
 import { servicesConfigured } from "@/lib/services";
 
 async function MemberContent() {
@@ -20,11 +21,10 @@ async function MemberContent() {
   if (!token) throw new Error("Clerk did not provide a Convex token for the member session.");
 
   const options = { token };
-  const [viewer, tools, loans, inbox] = await Promise.all([
+  const [viewer, tools, stats] = await Promise.all([
     fetchQuery(api.members.viewer, {}, options),
-    fetchQuery(api.marketplace.board, {}, options),
-    fetchQuery(api.marketplace.myLoans, {}, options),
-    fetchQuery(api.marketplace.inbox, {}, options),
+    fetchQuery(api.marketplace.board, { ...FIRST_PAGE, own: false }, options),
+    fetchQuery(api.marketplace.boardStats, {}, options),
   ]);
 
   return (
@@ -33,7 +33,7 @@ async function MemberContent() {
         key={userId}
         userId={userId}
         account={<UserButton />}
-        initial={{ viewer, tools, loans, inbox }}
+        initial={{ viewer, tools, stats }}
       />
     </ClerkProvider>
   );

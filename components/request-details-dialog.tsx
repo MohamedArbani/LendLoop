@@ -12,18 +12,21 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { BoardLoading } from "./board-states";
 import { LoanCard } from "./loan-card";
 
-type Loan = FunctionReturnType<typeof api.marketplace.myLoans>["incoming"][number];
+type Loan = FunctionReturnType<typeof api.marketplace.myLoans>["page"][number];
 
 export function RequestDetailsDialog({
   loan,
+  loading,
   trigger,
   description = "Loan dates are shown in UTC.",
   open,
   onOpenChange,
 }: {
-  loan?: Loan;
+  loan?: Loan | null;
+  loading?: boolean;
   trigger: ReactElement;
   description?: ReactNode;
   open?: boolean;
@@ -37,7 +40,13 @@ export function RequestDetailsDialog({
           <DialogTitle>Request details</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        {loan ? <LoanCard loan={loan} /> : <p>Request details are unavailable.</p>}
+        {loading ? (
+          <BoardLoading label="Loading request details…" compact />
+        ) : loan ? (
+          <LoanCard loan={loan} />
+        ) : (
+          <p>Request details are unavailable.</p>
+        )}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" size="touch">

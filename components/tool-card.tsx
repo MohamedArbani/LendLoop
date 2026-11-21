@@ -19,6 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { Category, Condition } from "@/lib/catalog";
+import { formatBookingDay } from "@/lib/catalog";
 
 const categoryIcons = {
   "Power tools": PlugsIcon,
@@ -39,6 +40,7 @@ export function ToolCard({
     condition?: Condition;
     description?: string;
     available?: boolean;
+    returnDue?: string | null;
     trusted?: boolean;
   };
   actions?: ReactNode;
@@ -52,7 +54,7 @@ export function ToolCard({
         {tool.available !== undefined && (
           <Badge variant={tool.available ? "success" : "secondary"}>
             {tool.available && <CheckCircleIcon data-icon="inline-start" aria-hidden />}
-            {tool.available ? "Available" : "On loan"}
+            {tool.available ? "Available now" : "On loan"}
           </Badge>
         )}
       </CardMedia>
@@ -62,6 +64,13 @@ export function ToolCard({
           {tool.condition && <span>{tool.condition}</span>}
         </div>
         <CardTitle as="h3">{tool.name}</CardTitle>
+        {tool.available === false && (
+          <CardDescription>
+            {tool.returnDue
+              ? "Due back " + formatBookingDay(tool.returnDue)
+              : "Return date uncertain"}
+          </CardDescription>
+        )}
         {tool.description && <CardDescription>{tool.description}</CardDescription>}
         {tool.trusted && (
           <Badge variant="success">

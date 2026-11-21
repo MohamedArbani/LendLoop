@@ -1,19 +1,22 @@
-import { preloadQuery } from "convex/nextjs";
+import { fetchQuery } from "convex/nextjs";
 import { cacheLife } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { GuestSignIn, LivePublicCatalog } from "@/components/guest-controls";
 import { PublicBoard, PublicCatalog } from "@/components/public-board";
 import { api } from "@/convex/_generated/api";
+import { FIRST_PAGE } from "@/lib/constants";
 import { servicesConfigured } from "@/lib/services";
 
 async function loadPublicCatalog() {
   "use cache";
   cacheLife("seconds");
-  return preloadQuery(api.marketplace.publicTools);
+  return fetchQuery(api.marketplace.publicTools, FIRST_PAGE);
 }
 
 async function Catalog() {
+  await connection();
   const initial = await loadPublicCatalog().catch((error: unknown) => {
     unstable_rethrow(error);
     return null;

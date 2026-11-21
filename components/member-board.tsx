@@ -6,7 +6,7 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 import type { FunctionReturnType } from "convex/server";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { api } from "@/convex/_generated/api";
 import { BoardLoading } from "./board-states";
@@ -16,8 +16,7 @@ import { Header } from "./public-board";
 type MemberSnapshot = {
   viewer: FunctionReturnType<typeof api.members.viewer>;
   tools: FunctionReturnType<typeof api.marketplace.board>;
-  loans: FunctionReturnType<typeof api.marketplace.myLoans>;
-  inbox: FunctionReturnType<typeof api.marketplace.inbox>;
+  stats: FunctionReturnType<typeof api.marketplace.boardStats>;
 };
 
 function MemberContent({ initial }: { initial: MemberSnapshot }) {
@@ -25,9 +24,7 @@ function MemberContent({ initial }: { initial: MemberSnapshot }) {
   const args = isAuthenticated ? {} : "skip";
   const liveViewer = useQuery(api.members.viewer, args);
   const viewer = liveViewer === undefined ? initial.viewer : liveViewer;
-  const tools = useQuery(api.marketplace.board, args) ?? initial.tools;
-  const loans = useQuery(api.marketplace.myLoans, args) ?? initial.loans;
-  const inbox = useQuery(api.marketplace.inbox, args) ?? initial.inbox;
+  const stats = useQuery(api.marketplace.boardStats, args) ?? initial.stats;
   const register = useMutation(api.members.register);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -45,7 +42,14 @@ function MemberContent({ initial }: { initial: MemberSnapshot }) {
 
   const connectionFailed = !isLoading && !isAuthenticated;
   if (viewer && !connectionFailed) {
-    return <Dashboard admin={viewer.role === "admin"} tools={tools} loans={loans} inbox={inbox} />;
+    return (
+      <Dashboard
+        admin={viewer.role === "admin"}
+        initialTools={initial.tools}
+        stats={stats}
+        authenticated={isAuthenticated}
+      />
+    );
   }
 
   return (
@@ -58,8 +62,14 @@ function MemberContent({ initial }: { initial: MemberSnapshot }) {
               : "We couldn’t set up your account"}
           </AlertTitle>
           <AlertDescription>
+            {connectionFailed
+              ? "Reload the page to reconnect."
+              : "Try again to finish setting up your account."}
+          </AlertDescription>
+          <AlertAction>
             <Button
               variant="outline"
+              size="touch"
               onClick={() => {
                 if (connectionFailed) {
                   window.location.reload();
@@ -71,7 +81,7 @@ function MemberContent({ initial }: { initial: MemberSnapshot }) {
             >
               Try again
             </Button>
-          </AlertDescription>
+          </AlertAction>
         </Alert>
       ) : (
         <BoardLoading label="Opening your tool board…" />

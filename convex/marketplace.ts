@@ -1,11 +1,17 @@
+import { getPage } from "convex-helpers/server/pagination";
+import type { PageRequest } from "convex-helpers/server/pagination";
+import { paginationResultValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import { isDay, utcDay } from "../lib/catalog";
+import { PAGE_SIZES } from "../lib/constants";
+import type { PageSize } from "../lib/constants";
 import { internal } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { DataModel, Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { currentMember, requireMember } from "./members";
-import { eventKind, listing } from "./validators";
+import schema from "./schema";
+import { category, eventKind, listing, status as loanStatus } from "./validators";
 
 function cleanListing(args: Pick<Doc<"tools">, "name" | "category" | "condition" | "description">) {
   const name = args.name.trim();
@@ -16,109 +22,341 @@ function cleanListing(args: Pick<Doc<"tools">, "name" | "category" | "condition"
   return { name, category: args.category, condition: args.condition, description };
 }
 
-async function availableNow(ctx: QueryCtx) {
+async function boardDay(ctx: QueryCtx) {
   const clock = await ctx.db.query("boardClock").unique();
-  const today = clock?.day ?? utcDay();
-  const approved = await ctx.db
+  return clock?.day ?? utcDay();
+}
+
+const publicAvailability = { available: v.boolean(), returnDue: v.union(v.string(), v.null()) };
+
+const pageArgs = {
+  pageSize: v.union(...PAGE_SIZES.map((size) => v.literal(size))),
+  cursor: v.union(v.string(), v.null()),
+};
+const emptyPage = { page: [], isDone: true, continueCursor: "" };
+
+async function readPage<Table extends "tools" | "loans" | "notifications">(
+  ctx: QueryCtx,
+  source: Pick<PageRequest<DataModel, Table>, "table" | "index">,
+  prefix: (string | boolean)[],
+  pageSize: PageSize,
+  cursor: string | null,
+) {
+  let startIndexKey: (string | boolean | number)[] = prefix;
+  if (cursor !== null) {
+    if (cursor.length > 512) return emptyPage;
+    let value: unknown;
+    try {
+      value = JSON.parse(cursor);
+    } catch {
+      return emptyPage;
+    }
+    if (
+      !Array.isArray(value) ||
+      value[0] !== source.index ||
+      value.length !== prefix.length + 3 ||
+      !prefix.every((part, index) => value[index + 1] === part)
+    )
+      return emptyPage;
+    const creationTime: unknown = value.at(-2);
+    const id: unknown = value.at(-1);
+    if (
+      typeof creationTime !== "number" ||
+      !Number.isFinite(creationTime) ||
+      typeof id !== "string" ||
+      !ctx.db.normalizeId(source.table, id)
+    )
+      return emptyPage;
+    startIndexKey = [...prefix, creationTime, id];
+  }
+
+  // One lookahead keeps the page bounded as subscriptions react to inserts and deletes.
+  const { page, hasMore, indexKeys } = await getPage(ctx, {
+    ...source,
+    schema,
+    order: "desc",
+    startIndexKey,
+    startInclusive: cursor === null,
+    endIndexKey: prefix,
+    absoluteMaxRows: pageSize,
+  });
+  return {
+    page,
+    isDone: !hasMore,
+    continueCursor: hasMore ? JSON.stringify([source.index, ...indexKeys.at(-1)!]) : "",
+  };
+}
+
+async function toolAvailability(ctx: QueryCtx, tool: Id<"tools">, today: string) {
+  const loan = await ctx.db
     .query("loans")
-    .withIndex("by_status_end", (q) => q.eq("status", "approved"))
-    .collect();
-  const away = new Set(approved.filter((loan) => loan.start <= today).map((loan) => loan.tool));
-  const tools = await ctx.db
-    .query("tools")
-    .withIndex("by_archived", (q) => q.eq("archived", false))
-    .order("desc")
-    .collect();
-  return tools.map((tool) => ({ ...tool, available: !away.has(tool._id) }));
+    .withIndex("by_tool_status_start", (q) =>
+      q.eq("tool", tool).eq("status", "approved").lte("start", today),
+    )
+    .first();
+
+  return { available: loan === null, returnDue: loan && loan.end >= today ? loan.end : null };
 }
 
 export const publicTools = query({
-  args: {},
-  handler: async (ctx) =>
-    (await availableNow(ctx))
-      .filter((tool) => tool.available)
-      .map(({ name, category }) => ({ name, category })),
+  args: pageArgs,
+  returns: paginationResultValidator(
+    v.object({ name: v.string(), category, ...publicAvailability }),
+  ),
+  handler: async (ctx, { pageSize, cursor }) => {
+    const today = await boardDay(ctx);
+    const result = await readPage(
+      ctx,
+      { table: "tools", index: "by_archived" },
+      [false],
+      pageSize,
+      cursor,
+    );
+    return {
+      ...result,
+      page: await Promise.all(
+        result.page.map(async ({ _id, name, category }) => ({
+          name,
+          category,
+          ...(await toolAvailability(ctx, _id, today)),
+        })),
+      ),
+    };
+  },
 });
 
 export const board = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { ...pageArgs, own: v.boolean(), category: v.optional(category) },
+  returns: paginationResultValidator(
+    v.object({
+      id: v.id("tools"),
+      ...listing,
+      ...publicAvailability,
+      mine: v.boolean(),
+      lender: v.union(v.id("members"), v.null()),
+      trusted: v.boolean(),
+    }),
+  ),
+  handler: async (ctx, { pageSize, cursor, own, category }) => {
     const member = await currentMember(ctx);
-    if (!member) return [];
-    return Promise.all(
-      (await availableNow(ctx)).map(
-        async ({ _id, name, category, condition, description, owner, available }) => ({
+    if (!member) return emptyPage;
+    const today = await boardDay(ctx);
+    const result = own
+      ? await readPage(
+          ctx,
+          { table: "tools", index: "by_owner_archived" },
+          [member._id, false],
+          pageSize,
+          cursor,
+        )
+      : category
+        ? await readPage(
+            ctx,
+            { table: "tools", index: "by_archived_category" },
+            [false, category],
+            pageSize,
+            cursor,
+          )
+        : await readPage(ctx, { table: "tools", index: "by_archived" }, [false], pageSize, cursor);
+    return {
+      ...result,
+      page: await Promise.all(
+        result.page.map(async ({ _id, name, category, condition, description, owner }) => ({
           id: _id,
           name,
           category,
           condition,
           description,
-          available,
+          ...(await toolAvailability(ctx, _id, today)),
           mine: owner === member._id,
           lender: member.role === "admin" ? owner : null,
           trusted: (await ctx.db.get("members", owner))?.trusted ?? false,
-        }),
+        })),
       ),
-    );
+    };
   },
 });
 
-export const myLoans = query({
+export const boardStats = query({
   args: {},
+  returns: v.union(
+    v.null(),
+    v.object({
+      available: v.string(),
+      listings: v.string(),
+      incoming: v.string(),
+    }),
+  ),
   handler: async (ctx) => {
     const member = await currentMember(ctx);
-    if (!member) return { incoming: [], outgoing: [], all: [] };
-    const [incoming, outgoing, all] = await Promise.all([
+    if (!member) return null;
+    const today = await boardDay(ctx);
+    // Keep overview reads bounded independently of the selected page.
+    const limit = PAGE_SIZES[PAGE_SIZES.length - 1];
+    const [tools, owned, pending] = await Promise.all([
+      ctx.db
+        .query("tools")
+        .withIndex("by_archived", (q) => q.eq("archived", false))
+        .take(limit + 1),
+      ctx.db
+        .query("tools")
+        .withIndex("by_owner_archived", (q) => q.eq("owner", member._id).eq("archived", false))
+        .take(limit + 1),
       ctx.db
         .query("loans")
-        .withIndex("by_lender", (q) => q.eq("lender", member._id))
-        .order("desc")
-        .collect(),
-      ctx.db
-        .query("loans")
-        .withIndex("by_borrower", (q) => q.eq("borrower", member._id))
-        .order("desc")
-        .collect(),
-      member.role === "admin" ? ctx.db.query("loans").order("desc").collect() : [],
+        .withIndex("by_lender_status", (q) => q.eq("lender", member._id).eq("status", "pending"))
+        .take(limit + 1),
     ]);
-    const format = async (loan: Doc<"loans">) => {
-      const tool = await ctx.db.get("tools", loan.tool);
-      const lender = await ctx.db.get("members", loan.lender);
-      const latest = await ctx.db
-        .query("events")
-        .withIndex("by_loan", (q) => q.eq("loan", loan._id))
-        .order("desc")
-        .first();
-      const isParticipant = member._id === loan.borrower || member._id === loan.lender;
-      return {
-        id: loan._id,
-        name: tool?.name ?? "Archived tool",
-        start: loan.start,
-        end: loan.end,
-        status: loan.status,
-        lastReminderDay: loan.lastReminderDay,
-        delivery: latest?.failedAt
-          ? ("failed" as const)
-          : latest?.deliveredAt
-            ? ("logged" as const)
-            : ("queued" as const),
-        lender: member.role === "admin" ? loan.lender : null,
-        trusted: lender?.trusted ?? false,
-        isLender: isParticipant && member._id === loan.lender,
-        isBorrower: isParticipant && member._id === loan.borrower,
-      };
-    };
+    const availability = await Promise.all(
+      tools.slice(0, limit).map((tool) => toolAvailability(ctx, tool._id, today)),
+    );
+    const available = availability.filter((tool) => tool.available).length;
     return {
-      incoming: await Promise.all(incoming.map(format)),
-      outgoing: await Promise.all(outgoing.map(format)),
-      all: await Promise.all(all.map(format)),
+      available: tools.length > limit ? `${available}+` : String(available),
+      listings: owned.length > limit ? `${limit}+` : String(owned.length),
+      incoming: pending.length > limit ? `${limit}+` : String(pending.length),
     };
+  },
+});
+
+function approvedLoans(ctx: QueryCtx | MutationCtx, tool: Id<"tools">, start: string) {
+  return ctx.db
+    .query("loans")
+    .withIndex("by_tool_status_end", (q) =>
+      q.eq("tool", tool).eq("status", "approved").gte("end", start),
+    );
+}
+
+function overdueLoan(ctx: QueryCtx | MutationCtx, tool: Id<"tools">, today: string) {
+  return ctx.db
+    .query("loans")
+    .withIndex("by_tool_status_end", (q) =>
+      q.eq("tool", tool).eq("status", "approved").lt("end", today),
+    )
+    .first();
+}
+
+function bookingConflict(ctx: MutationCtx, tool: Id<"tools">, start: string, end: string) {
+  return approvedLoans(ctx, tool, start)
+    .filter((q) => q.lte(q.field("start"), end))
+    .first();
+}
+
+const bookedMessage = "This tool is already booked for those dates.";
+
+export const bookingAvailability = query({
+  args: { tool: v.id("tools") },
+  returns: v.union(
+    v.null(),
+    v.object({
+      today: v.string(),
+      overdue: v.boolean(),
+      ranges: v.array(
+        v.object({
+          start: v.string(),
+          end: v.string(),
+        }),
+      ),
+    }),
+  ),
+  handler: async (ctx, { tool }) => {
+    const member = await currentMember(ctx);
+    if (!member) return null;
+    const listing = await ctx.db.get("tools", tool);
+    if (!listing || listing.archived || listing.owner === member._id) return null;
+
+    const today = await boardDay(ctx);
+    const overdue = (await overdueLoan(ctx, tool, today)) !== null;
+    const ranges = overdue ? [{ start: today, end: today }] : [];
+    for await (const { start, end } of approvedLoans(ctx, tool, today)) ranges.push({ start, end });
+    return { today, overdue, ranges };
+  },
+});
+
+const loanCard = v.object({
+  id: v.id("loans"),
+  name: v.string(),
+  start: v.string(),
+  end: v.string(),
+  status: loanStatus,
+  lastReminderDay: v.optional(v.string()),
+  delivery: v.union(v.literal("failed"), v.literal("logged"), v.literal("queued")),
+  lender: v.union(v.id("members"), v.null()),
+  trusted: v.boolean(),
+  isLender: v.boolean(),
+  isBorrower: v.boolean(),
+});
+
+async function formatLoan(ctx: QueryCtx, loan: Doc<"loans">, member: Doc<"members">) {
+  const [tool, lender, latest] = await Promise.all([
+    ctx.db.get("tools", loan.tool),
+    ctx.db.get("members", loan.lender),
+    ctx.db
+      .query("events")
+      .withIndex("by_loan", (q) => q.eq("loan", loan._id))
+      .order("desc")
+      .first(),
+  ]);
+  return {
+    id: loan._id,
+    name: tool?.name ?? "Archived tool",
+    start: loan.start,
+    end: loan.end,
+    status: loan.status,
+    lastReminderDay: loan.lastReminderDay,
+    delivery: latest?.failedAt
+      ? ("failed" as const)
+      : latest?.deliveredAt
+        ? ("logged" as const)
+        : ("queued" as const),
+    lender: member.role === "admin" ? loan.lender : null,
+    trusted: lender?.trusted ?? false,
+    isLender: member._id === loan.lender,
+    isBorrower: member._id === loan.borrower,
+  };
+}
+
+export const myLoans = query({
+  args: {
+    ...pageArgs,
+    view: v.union(v.literal("incoming"), v.literal("outgoing"), v.literal("all")),
+  },
+  returns: paginationResultValidator(loanCard),
+  handler: async (ctx, { pageSize, cursor, view }) => {
+    const member = await currentMember(ctx);
+    if (!member || (view === "all" && member.role !== "admin")) return emptyPage;
+    const result =
+      view === "all"
+        ? await readPage(ctx, { table: "loans", index: "by_creation_time" }, [], pageSize, cursor)
+        : await readPage(
+            ctx,
+            { table: "loans", index: view === "incoming" ? "by_lender" : "by_borrower" },
+            [member._id],
+            pageSize,
+            cursor,
+          );
+    return {
+      ...result,
+      page: await Promise.all(result.page.map((loan) => formatLoan(ctx, loan, member))),
+    };
+  },
+});
+
+export const loanDetails = query({
+  args: { id: v.id("loans") },
+  returns: v.union(v.null(), loanCard),
+  handler: async (ctx, { id }) => {
+    const member = await currentMember(ctx);
+    if (!member) return null;
+    const loan = await ctx.db.get("loans", id);
+    if (!loan || (loan.lender !== member._id && loan.borrower !== member._id)) return null;
+    return formatLoan(ctx, loan, member);
   },
 });
 
 export const inbox = query({
-  args: {},
-  returns: v.array(
+  args: pageArgs,
+  returns: paginationResultValidator(
     v.object({
       id: v.id("notifications"),
       loanId: v.id("loans"),
@@ -127,27 +365,32 @@ export const inbox = query({
       tool: v.string(),
     }),
   ),
-  handler: async (ctx) => {
+  handler: async (ctx, { pageSize, cursor }) => {
     const member = await currentMember(ctx);
-    if (!member) return [];
-    const notifications = await ctx.db
-      .query("notifications")
-      .withIndex("by_recipient", (q) => q.eq("recipient", member._id))
-      .order("desc")
-      .take(15);
-    return Promise.all(
-      notifications.map(async (notification) => {
-        const loan = await ctx.db.get("loans", notification.loan);
-        const tool = loan && (await ctx.db.get("tools", loan.tool));
-        return {
-          id: notification._id,
-          loanId: notification.loan,
-          at: notification._creationTime,
-          kind: notification.kind,
-          tool: tool?.name ?? "Archived tool",
-        };
-      }),
+    if (!member) return emptyPage;
+    const result = await readPage(
+      ctx,
+      { table: "notifications", index: "by_recipient" },
+      [member._id],
+      pageSize,
+      cursor,
     );
+    return {
+      ...result,
+      page: await Promise.all(
+        result.page.map(async (notification) => {
+          const loan = await ctx.db.get("loans", notification.loan);
+          const tool = loan && (await ctx.db.get("tools", loan.tool));
+          return {
+            id: notification._id,
+            loanId: notification.loan,
+            at: notification._creationTime,
+            kind: notification.kind,
+            tool: tool?.name ?? "Archived tool",
+          };
+        }),
+      ),
+    };
   },
 });
 
@@ -212,38 +455,77 @@ async function enqueue(
 }
 
 export const request = mutation({
-  args: { tool: v.id("tools"), start: v.string(), end: v.string() },
-  handler: async (ctx, { tool: toolId, start, end }) => {
+  args: { tool: v.id("tools"), start: v.string(), end: v.string(), idempotencyKey: v.string() },
+  returns: v.id("loans"),
+  handler: async (ctx, { tool: toolId, start, end, idempotencyKey }) => {
     const borrower = await requireMember(ctx);
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)
+    ) {
+      throw new ConvexError("Invalid request key. Reopen the request and try again.");
+    }
+    if (!isDay(start) || !isDay(end) || end < start) {
+      throw new ConvexError("Choose a valid date range starting today or later.");
+    }
+
+    const key = idempotencyKey.toLowerCase();
+    const previous = await ctx.db
+      .query("bookingRequests")
+      .withIndex("by_borrower_key", (q) => q.eq("borrower", borrower._id).eq("key", key))
+      .unique();
+    if (previous) {
+      const loan = await ctx.db.get("loans", previous.loan);
+      if (!loan || loan.tool !== toolId || loan.start !== start || loan.end !== end) {
+        throw new ConvexError(
+          "This request key has already been used for different dates or a different tool.",
+        );
+      }
+      return previous.loan;
+    }
+
     const tool = await ctx.db.get("tools", toolId);
     if (!tool || tool.archived || tool.owner === borrower._id)
       throw new ConvexError("This tool can’t be requested.");
-    if (!isDay(start) || !isDay(end) || start < utcDay() || end < start) {
-      throw new ConvexError("Choose a valid date range starting today or later.");
+    const today = utcDay();
+    if (start < today) throw new ConvexError("Choose a valid date range starting today or later.");
+
+    const findExisting = (status: "approved" | "pending") =>
+      ctx.db
+        .query("loans")
+        .withIndex("by_borrower_tool_start_end_status", (q) =>
+          q
+            .eq("borrower", borrower._id)
+            .eq("tool", toolId)
+            .eq("start", start)
+            .eq("end", end)
+            .eq("status", status),
+        )
+        .first();
+    const approved = await findExisting("approved");
+    if (approved) {
+      await ctx.db.insert("bookingRequests", { borrower: borrower._id, key, loan: approved._id });
+      return approved._id;
     }
-    const existing = await ctx.db
-      .query("loans")
-      .withIndex("by_borrower", (q) => q.eq("borrower", borrower._id))
-      .filter((q) =>
-        q.and(
-          q.eq(q.field("tool"), toolId),
-          q.eq(q.field("start"), start),
-          q.eq(q.field("end"), end),
-          q.or(q.eq(q.field("status"), "pending"), q.eq(q.field("status"), "approved")),
-        ),
-      )
-      .first();
-    if (existing) return existing._id;
-    const id = await ctx.db.insert("loans", {
-      tool: toolId,
-      lender: tool.owner,
-      borrower: borrower._id,
-      start,
-      end,
-      status: "pending",
-    });
-    await enqueue(ctx, id, tool.owner, "requested");
-    return id;
+
+    if (await bookingConflict(ctx, toolId, start, end)) throw new ConvexError(bookedMessage);
+    if (start === today && (await overdueLoan(ctx, toolId, today))) {
+      throw new ConvexError("The tool is awaiting return. Choose future dates.");
+    }
+
+    const pending = await findExisting("pending");
+    const loan =
+      pending?._id ??
+      (await ctx.db.insert("loans", {
+        tool: toolId,
+        lender: tool.owner,
+        borrower: borrower._id,
+        start,
+        end,
+        status: "pending",
+      }));
+    await ctx.db.insert("bookingRequests", { borrower: borrower._id, key, loan });
+    if (!pending) await enqueue(ctx, loan, tool.owner, "requested");
+    return loan;
   },
 });
 
@@ -257,12 +539,13 @@ export const transition = mutation({
       v.literal("cancelled"),
     ),
   },
+  returns: v.null(),
   handler: async (ctx, { id, status }) => {
     const member = await requireMember(ctx);
     const loan = await ctx.db.get("loans", id);
     const actor = status === "cancelled" ? loan?.borrower : loan?.lender;
     if (!loan || actor !== member._id) throw new ConvexError("You can’t change this request.");
-    if (loan.status === status) return;
+    if (loan.status === status) return null;
     if (loan.status !== (status === "returned" ? "approved" : "pending"))
       throw new ConvexError("This request has already changed.");
     const today = utcDay();
@@ -272,19 +555,15 @@ export const transition = mutation({
       const tool = await ctx.db.get("tools", loan.tool);
       if (!tool || tool.archived || loan.end < today)
         throw new ConvexError("This request is no longer available.");
-      const approved = await ctx.db
-        .query("loans")
-        .withIndex("by_tool_status_end", (q) => q.eq("tool", loan.tool).eq("status", "approved"))
-        .collect();
-      if (
-        approved.some(
-          (other) => other.end < today || (other.start <= loan.end && other.end >= loan.start),
-        )
-      ) {
-        throw new ConvexError("The tool is already booked for those dates or is awaiting return.");
+      if (await bookingConflict(ctx, loan.tool, loan.start, loan.end)) {
+        throw new ConvexError(bookedMessage);
+      }
+      if (await overdueLoan(ctx, loan.tool, today)) {
+        throw new ConvexError("The tool is awaiting return. Try again after it’s returned.");
       }
     }
     await ctx.db.patch("loans", id, { status });
     await enqueue(ctx, id, status === "cancelled" ? loan.lender : loan.borrower, status);
+    return null;
   },
 });

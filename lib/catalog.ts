@@ -9,6 +9,17 @@ export const categories = [
 export const conditions = ["Like new", "Good", "Well used"] as const;
 export type Category = (typeof categories)[number];
 export type Condition = (typeof conditions)[number];
+export type BookingRange = { start: string; end: string };
+
+export function overlapsBooking(ranges: readonly BookingRange[], start: string, end: string) {
+  return ranges.some((range) => range.start <= end && range.end >= start);
+}
+
+export function formatBookingDay(day: string) {
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" }).format(
+    Date.parse(day),
+  );
+}
 
 export function utcDay(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
