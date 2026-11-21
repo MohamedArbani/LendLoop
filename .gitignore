@@ -5,6 +5,8 @@ node_modules/
 !n8n/.env.example
 *.tsbuildinfo
 coverage/
+playwright-report/
+test-results/
 
 .convex/
 .vitest/

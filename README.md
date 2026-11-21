@@ -54,6 +54,12 @@ To finish Clerk:
 On subsequent starts, run `docker compose up -d`, the Convex command above,
 and `npm run dev`. Open [LendLoop](http://localhost:3000).
 
+After editing `n8n/.env`, run `docker compose up -d --force-recreate n8n` so the container
+loads the new values. The Docker data volume retains its workflows and executions. If
+n8n logs `ECONNREFUSED 127.0.0.1:3211` for the Convex callback, check that the running
+container uses `http://host.docker.internal:3211`. Once the callback is reachable, replay
+failed events using the procedure below.
+
 ### Alternative: hosted Convex
 
 Use Node.js 22.18+, 24.11+, or 26+ (see `engines.node`), npm 11.17, Docker Compose, a Clerk development application, and a Convex development deployment. Next.js and n8n run locally. Hosted Convex needs an HTTPS route to the n8n webhook. Use a tunnel or an HTTPS reverse proxy that forwards **only** `POST /webhook/lendloop-request-event` to local n8n. Keep the n8n editor on localhost.
@@ -112,6 +118,23 @@ The Compose profile runs a dedicated single-owner n8n with an internal task runn
 
 5. For an overdue check, use an approved, unreturned loan with a return day before today in UTC. In a disposable dev deployment, you can move an approved loan’s dates to the previous day in the Convex dashboard. Run **Daily overdue reminders** manually and check the borrower’s Activity and the loan’s reminder date. Run it again to confirm only one reminder is recorded for the day.
 
+## Browser tests
+
+Install Chromium and run the guest and offline checks.
+
+```sh
+npx playwright install chromium
+npm run test:e2e
+```
+
+Run the signed-in tests with development Clerk keys and a disposable Convex deployment configured in `.env.local`. Keep the published n8n request workflow running with its signed Convex callback configured. The tests verify delivered Activity entries. They create and delete temporary Clerk users. Convex retains the test loan history and archived listings.
+
+```sh
+E2E_AUTH=1 npm run test:e2e
+```
+
+Set `E2E_CONVEX_ADMIN_KEY` for that same Convex deployment to include the administrator test. Set `E2E_BASE_URL` to run the selected suite against an already running app, such as a local production build.
+
 ## Architecture
 
 | Component                    | Responsibility                                                                                               |
@@ -122,6 +145,8 @@ The Compose profile runs a dedicated single-owner n8n with an internal task runn
 | n8n request workflow         | Verify the event signature, call the signed mock delivery endpoint, then acknowledge Convex                  |
 | n8n daily workflow           | At 09:00 UTC, page through approved overdue loans and log each eligible borrower’s reminder                  |
 | n8n error workflow           | Capture failed workflow and execution IDs for triage                                                         |
+
+The Next.js proxy routes signed-in traffic to `/dashboard`. Cache Components prerender the public shell and dashboard loading state. The dashboard streams an authenticated snapshot of the board, loans, and inbox on each request. Convex subscriptions hydrate that snapshot and update open pages after writes. Next.js uses its `seconds` cache profile for the public catalog, which contains names and categories only.
 
 Loan dates are inclusive UTC calendar days. A lender can approve or decline pending requests and mark active loans returned once the loan starts. Borrowers can cancel their own pending requests. Booking approval checks overlaps in the same Convex transaction that changes the state. Removing a listing archives it and cancels pending requests. Approved loans can still be returned and loan history remains available.
 

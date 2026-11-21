@@ -5,7 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { currentMember, requireMember } from "./members";
-import { listing } from "./validators";
+import { eventKind, listing } from "./validators";
 
 function cleanListing(args: Pick<Doc<"tools">, "name" | "category" | "condition" | "description">) {
   const name = args.name.trim();
@@ -118,6 +118,15 @@ export const myLoans = query({
 
 export const inbox = query({
   args: {},
+  returns: v.array(
+    v.object({
+      id: v.id("notifications"),
+      loanId: v.id("loans"),
+      at: v.number(),
+      kind: eventKind,
+      tool: v.string(),
+    }),
+  ),
   handler: async (ctx) => {
     const member = await currentMember(ctx);
     if (!member) return [];
@@ -132,6 +141,7 @@ export const inbox = query({
         const tool = loan && (await ctx.db.get("tools", loan.tool));
         return {
           id: notification._id,
+          loanId: notification.loan,
           at: notification._creationTime,
           kind: notification.kind,
           tool: tool?.name ?? "Archived tool",

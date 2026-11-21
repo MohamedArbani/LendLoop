@@ -1,8 +1,9 @@
-import { defineConfig } from "vite-plus";
+import { configDefaults, defineConfig } from "vite-plus";
 
 export default defineConfig({
   test: {
     environment: "edge-runtime",
+    exclude: [...configDefaults.exclude, "e2e/**"],
   },
   // Formatting is opt-in: this project did not previously enforce a formatter.
   check: { fmt: false },
@@ -15,7 +16,15 @@ export default defineConfig({
     env: {
       builtin: true,
     },
-    ignorePatterns: [".next/**", "out/**", "build/**", "next-env.d.ts", "convex/_generated/**"],
+    ignorePatterns: [
+      ".next/**",
+      "out/**",
+      "build/**",
+      "next-env.d.ts",
+      "convex/_generated/**",
+      ".agents/**",
+      ".claude/**",
+    ],
     rules: {
       "no-array-constructor": "error",
       "no-unused-expressions": "error",

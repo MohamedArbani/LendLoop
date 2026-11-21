@@ -21,3 +21,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Frontend design system
+
+- Use the local shadcn/ui components in `components/ui/` for controls, cards, feedback, overlays, and navigation. Install missing primitives from the official registry with the shadcn CLI. Preserve the Mira preset `b6UT4h4AdO` and the Radix base.
+- Use existing `variant` and `size` props first. Add a typed variant or size to the shared primitive when the design needs a reusable treatment. Keep screen-level layout on semantic wrappers and avoid styling overrides through `className` on component instances.
+- Define theme colors and typography with semantic Tailwind CSS v4 tokens in `app/styles.css`. Use Phosphor icons and keep decorative icons hidden from assistive technology.
+- Compose forms with `FieldGroup`, `Field`, and `FieldLabel`. Use shadcn loading, empty, error, and pending states. Show action confirmations and errors through the shared Sonner toaster. Give overlays accessible titles and descriptions, and restore keyboard focus on dismissal.
+- Use short opacity and transform animations and honor `prefers-reduced-motion`. Verify layouts at narrow and wide widths and check keyboard interaction for new controls.
+- Run `npm run check`, `npm test`, and `npm run build` before handing off changes. Use npm to update dependencies and `package-lock.json`.

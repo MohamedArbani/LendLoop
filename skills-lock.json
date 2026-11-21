@@ -264,6 +264,13 @@
       "skillPath": "skills/convex-verify/SKILL.md",
       "computedHash": "5bb7da26480ce5a94475c81b9ec85e6935757c959873ab62dc9a0a67f13d1b2a",
       "installMode": "copy"
+    },
+    "shadcn": {
+      "source": "shadcn-ui/ui",
+      "commit": "45bbf9ba23c9c0f63d38887947e5fb06f59c7da3",
+      "sourceType": "github",
+      "skillPath": "skills/shadcn/SKILL.md",
+      "computedHash": "388962d16c7a4f13aaeee0d8f128e50a87df8553d42ef7988c39c0e1c74a40e8"
     }
   }
 }

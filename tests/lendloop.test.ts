@@ -178,7 +178,7 @@ test("Convex HTTP rejects stale, tampered, cross-route and unsigned automation r
 });
 
 test("notification action and real workflow Code nodes agree on both signatures, with at-most-one inbox entry", async () => {
-  const { t, lender, borrower, tool } = await setup();
+  const { t, lender, borrower, other, tool } = await setup();
   const id = await borrower.mutation(api.marketplace.request, {
     tool,
     start: today,
@@ -212,22 +212,72 @@ test("notification action and real workflow Code nodes agree on both signatures,
   await t.action(internal.dispatch.send, { eventId: event._id, attempt: 2 });
   expect(webhook).toHaveBeenCalledTimes(1);
   expect(await lender.query(api.marketplace.inbox, {})).toMatchObject([
-    { kind: "requested", tool: listing.name },
+    { kind: "requested", tool: listing.name, loanId: id },
   ]);
   expect(await borrower.query(api.marketplace.inbox, {})).toEqual([]);
+  expect(await other.query(api.marketplace.inbox, {})).toEqual([]);
 });
 
-test("request delivery retries then records a visible exhausted failure", async () => {
-  const { t, lender, borrower, tool } = await setup();
-  await borrower.mutation(api.marketplace.request, { tool, start: today, end: tomorrow });
-  vi.stubEnv("N8N_REQUEST_WEBHOOK_URL", "https://n8n.example.test/webhook/lendloop-request-event");
-  const fetch = vi.fn(async () => new Response(null, { status: 503 }));
-  vi.stubGlobal("fetch", fetch);
-  vi.spyOn(console, "error").mockImplementation(() => {});
-  await t.finishAllScheduledFunctions(() => vi.runAllTimers());
-  expect(fetch).toHaveBeenCalledTimes(4);
-  expect((await lender.query(api.marketplace.myLoans, {})).incoming[0].delivery).toBe("failed");
-});
+test.each([
+  { status: 503, reason: "Webhook returned HTTP 503." },
+  { status: 200, reason: "Webhook did not record delivery in Convex." },
+])(
+  "HTTP $status without a write-back retries, fails, and can be replayed",
+  async ({ status, reason }) => {
+    const { t, lender, borrower, tool } = await setup();
+    const loan = await borrower.mutation(api.marketplace.request, {
+      tool,
+      start: today,
+      end: tomorrow,
+    });
+    vi.stubEnv(
+      "N8N_REQUEST_WEBHOOK_URL",
+      "https://n8n.example.test/webhook/lendloop-request-event",
+    );
+    const webhook = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(
+      async () => new Response(null, { status }),
+    );
+    vi.stubGlobal("fetch", webhook);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await lender.query(api.marketplace.myLoans, {})).incoming[0].delivery).toBe("queued");
+
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+    expect(webhook).toHaveBeenCalledTimes(4);
+    expect(log).toHaveBeenLastCalledWith(
+      "Request notification failed",
+      expect.objectContaining({ attempt: 4, reason }),
+    );
+    expect((await lender.query(api.marketplace.myLoans, {})).incoming[0].delivery).toBe("failed");
+    expect(await lender.query(api.marketplace.inbox, {})).toEqual([]);
+
+    const event = await t.run((ctx) =>
+      ctx.db
+        .query("events")
+        .withIndex("by_loan", (q) => q.eq("loan", loan))
+        .first(),
+    );
+    expect(event?.failedAt).toBeDefined();
+    webhook.mockImplementationOnce(async (_url, init) => {
+      const verified = runCode(requestFlow, "Verify request signature", {
+        headers: init.headers,
+        body: JSON.parse(init.body as string),
+      });
+      return sendCodeRequest(
+        t,
+        "event-delivered",
+        runCode(requestFlow, "Sign event delivery", verified),
+      );
+    });
+    await t.action(internal.dispatch.send, { eventId: event!._id, attempt: 1 });
+    await t.action(internal.dispatch.send, { eventId: event!._id, attempt: 1 });
+    expect(webhook).toHaveBeenCalledTimes(5);
+    expect((await lender.query(api.marketplace.myLoans, {})).incoming[0].delivery).toBe("logged");
+    expect(await lender.query(api.marketplace.inbox, {})).toMatchObject([
+      { kind: "requested", tool: listing.name },
+    ]);
+    expect(await borrower.query(api.marketplace.inbox, {})).toEqual([]);
+  },
+);
 
 test("daily workflow pages overdue loans, retries safely and skips loans returned before write-back", async () => {
   const { t, lender, borrower, tool } = await setup();

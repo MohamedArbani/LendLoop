@@ -1,121 +1,141 @@
-import {
-  ArrowUpRight,
-  CircleDot,
-  Drill,
-  Flame,
-  Hammer,
-  Leaf,
-  Package,
-  TentTree,
-  Wrench,
-} from "lucide-react";
+import { ArrowDownIcon, ArrowUpRightIcon, WrenchIcon } from "@phosphor-icons/react/dist/ssr";
+import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { Category } from "../lib/catalog";
+import type { Category } from "@/lib/catalog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { BoardEmpty, BoardLoading } from "./board-states";
+import { ThemeToggle } from "./theme-toggle";
+import { ToolCard } from "./tool-card";
 
-const categoryIcons = {
-  "Power tools": Drill,
-  Garden: Leaf,
-  Kitchen: Flame,
-  Camping: TentTree,
-  "Hand tools": Hammer,
-  Other: Package,
-};
-
-export function ToolIcon({ category }: { category: Category }) {
-  const Icon = categoryIcons[category];
+export function Header({
+  actions,
+  catalog = false,
+  href = "/",
+}: {
+  actions?: ReactNode;
+  catalog?: boolean;
+  href?: string;
+}) {
   return (
-    <span className="toolIcon">
-      <Icon size={22} aria-hidden />
-    </span>
-  );
-}
-
-export function Header({ actions }: { actions?: ReactNode }) {
-  return (
-    <header className="header">
-      <div className="wrap headerInner">
-        <Link className="wordmark" href="/">
-          <span className="brandIcon">
-            <Wrench size={20} aria-hidden />
-          </span>
-          Lend<span>Loop</span>
-        </Link>
-        {actions}
+    <header data-layout="site-header">
+      <div data-layout="header-inner">
+        <Button asChild variant="brand">
+          <Link href={href}>
+            <Badge variant="brandIcon">
+              <WrenchIcon weight="bold" aria-hidden />
+            </Badge>
+            LendLoop
+          </Link>
+        </Button>
+        <div data-layout="actions">
+          {catalog && (
+            <Button asChild variant="ghost">
+              <a href="#tool-board">Tool library</a>
+            </Button>
+          )}
+          <ThemeToggle />
+          {actions}
+        </div>
       </div>
     </header>
   );
 }
 
-export function PublicBoard({
-  signIn,
+export function PublicBoard({ signIn, catalog }: { signIn?: ReactNode; catalog: ReactNode }) {
+  return (
+    <>
+      <Header catalog />
+      <main data-layout="page">
+        <section aria-labelledby="welcome-title" data-layout="hero" data-enter>
+          <div data-layout="hero-copy">
+            <Badge variant="secondary">
+              <WrenchIcon data-icon="inline-start" aria-hidden /> Neighborhood tool library
+            </Badge>
+            <h1 id="welcome-title">
+              Good tools.
+              <br /> <em>Better neighbors.</em>
+            </h1>
+            <p>
+              Borrow the tools you need for your next project and share the ones you already have.
+            </p>
+            <div data-layout="actions">
+              {signIn}
+              <Button asChild variant={signIn ? "outline" : "default"} size="touch">
+                <a href="#tool-board">
+                  Browse tools
+                  <ArrowDownIcon data-icon="inline-end" aria-hidden />
+                </a>
+              </Button>
+            </div>
+          </div>
+          <div data-layout="hero-image">
+            <Image
+              src="/workshop.webp"
+              alt=""
+              fill
+              sizes="(min-width: 80rem) 560px, (min-width: 48rem) 44vw, 100vw"
+              preload
+            />
+          </div>
+        </section>
+        {catalog}
+      </main>
+      <footer data-layout="site-footer">
+        <div data-layout="footer-inner">
+          <span>LendLoop · Neighborhood tool library</span>
+          <Button asChild variant="ghost">
+            <a href="#welcome-title">
+              Back to top <ArrowUpRightIcon data-icon="inline-end" aria-hidden />
+            </a>
+          </Button>
+        </div>
+      </footer>
+    </>
+  );
+}
+
+export function PublicCatalog({
   tools,
   notice,
 }: {
-  signIn?: ReactNode;
   tools?: { name: string; category: Category }[];
   notice?: string;
 }) {
   return (
-    <>
-      <Header actions={<span className="headerCaption">The neighborhood tool library</span>} />
-      <main className="wrap publicBoard">
-        <section className="hero">
-          <div>
-            <span className="eyebrow">
-              <CircleDot size={14} aria-hidden /> COMMUNITY TOOL SHARING
-            </span>
-            <h1>
-              Borrow what you need.
-              <br />
-              <em>Lend what you don’t.</em>
-            </h1>
-            <p>
-              Find a tool for your next project, or put the ones you already own to work in your
-              neighborhood.
-            </p>
-            {signIn}
-          </div>
-          <div className="heroMark" aria-hidden>
-            <span>
-              <Wrench />
-            </span>
-            <ArrowUpRight className="heroArrow" />
-          </div>
-        </section>
-        <section aria-labelledby="public-heading">
-          <div className="sectionHead">
-            <div>
-              <h2 id="public-heading">Available to borrow</h2>
-              <p>Tools currently on the board.</p>
-            </div>
-            {tools && <span className="pill">{tools.length} available</span>}
-          </div>
-          {notice ? (
-            <p className="empty" role="status">
-              {notice}
-            </p>
-          ) : tools === undefined ? (
-            <p className="empty" role="status">
-              Loading tools…
-            </p>
-          ) : tools.length === 0 ? (
-            <p className="empty">No tools have been listed yet. Sign in to add the first one.</p>
-          ) : (
-            <ul className="toolGrid publicGrid">
-              {tools.map((tool, index) => (
-                <li className="card publicCard" key={index}>
-                  <ToolIcon category={tool.category} />
-                  <div>
-                    <h3>{tool.name}</h3>
-                    <p>{tool.category}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </main>
-    </>
+    <section id="tool-board" aria-labelledby="public-heading" data-layout="section" data-enter>
+      <div data-layout="section-heading">
+        <div data-layout="heading">
+          <h2 id="public-heading">Available to borrow</h2>
+          <p>Find a tool for your next project.</p>
+        </div>
+        {tools && <Badge variant="outline">{tools.length} available</Badge>}
+      </div>
+      <Separator />
+      {notice ? (
+        <Alert role={undefined}>
+          <AlertTitle>The tool board is offline</AlertTitle>
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      ) : tools === undefined ? (
+        <BoardLoading label="Loading tools…" />
+      ) : tools.length === 0 ? (
+        <BoardEmpty
+          title="The shelves are empty"
+          description="Sign in to add the first tool to the library."
+        />
+      ) : (
+        <ul data-layout="catalog-grid">
+          {tools.map((tool, index) => (
+            <li key={`${tool.category}-${tool.name}-${index}`}>
+              <ToolCard tool={tool} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
