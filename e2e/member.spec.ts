@@ -112,7 +112,7 @@ test("a guest can browse and is redirected from the dashboard", async ({ page })
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("heading", { name: "Good tools. Better neighbors." })).toBeVisible();
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Sign in to lend or borrow" }).click();
   await expect(page.getByText("Sign in to", { exact: false }).first()).toBeVisible();
 });
 
@@ -232,16 +232,12 @@ test("listing and loan changes reach other sessions and the guest catalog", asyn
     await lender.getByRole("tab", { name: "Incoming requests" }).click();
     await toolCard(lender, name).getByRole("button", { name: "Approve" }).click();
     await expect(toolCard(borrower, name)).toContainText("Approved");
-    await expect(toolCard(guest, name)).toContainText("On loan");
-    await expect(toolCard(guest, name)).toContainText("Due back");
-    await expect(
-      toolCard(guest, name).getByRole("link", { name: "Sign in to request" }),
-    ).toBeVisible();
+    await expect(toolCard(guest, name)).toHaveCount(0);
     await expectActivity(borrower, name, "Request approved", "Approved");
     await expect(toolCard(borrower, name)).toContainText("Notification logged");
     await toolCard(lender, name).getByRole("button", { name: "Mark returned" }).click();
     await expect(toolCard(borrower, name)).toContainText("Returned");
-    await expect(toolCard(guest, name)).toContainText("Available now");
+    await expect(toolCard(guest, name)).toBeVisible();
     await expectActivity(borrower, name, "Return recorded", "Returned");
     await expect(toolCard(borrower, name)).toContainText("Notification logged");
 

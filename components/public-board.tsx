@@ -108,10 +108,8 @@ export function PublicCatalog({
           <h2 id="public-heading">Tool library</h2>
           <p>Find a tool for your next project.</p>
         </div>
-        {tools && (
-          <Badge variant="outline">
-            {tools.filter((tool) => tool.available).length} available on this page
-          </Badge>
+        {tools && tools.length > 0 && (
+          <Badge variant="outline">{tools.length} available on this page</Badge>
         )}
       </div>
       <Separator />
@@ -124,21 +122,14 @@ export function PublicCatalog({
         <BoardLoading label="Loading tools…" />
       ) : tools.length === 0 ? (
         <BoardEmpty
-          title="The shelves are empty"
-          description="Sign in to add the first tool to the library."
+          title="No available tools on this page"
+          description="Sign in to list a tool for your neighbors."
         />
       ) : (
         <ul data-layout="catalog-grid">
           {tools.map((tool, index) => (
             <li key={`${tool.category}-${tool.name}-${index}`}>
-              <ToolCard
-                tool={tool}
-                actions={
-                  <Button asChild variant="outline" size="action">
-                    <a href="#guest-sign-in">Sign in to request</a>
-                  </Button>
-                }
-              />
+              <ToolCard tool={tool} />
             </li>
           ))}
         </ul>

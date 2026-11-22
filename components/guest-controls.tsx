@@ -15,8 +15,8 @@ export function GuestSignIn() {
   return (
     <ClerkProvider>
       <SignInButton mode="modal" forceRedirectUrl="/dashboard" signUpForceRedirectUrl="/dashboard">
-        <Button size="touch" id="guest-sign-in">
-          Sign in <ArrowUpRightIcon data-icon="inline-end" aria-hidden />
+        <Button size="touch">
+          Sign in to lend or borrow <ArrowUpRightIcon data-icon="inline-end" aria-hidden />
         </Button>
       </SignInButton>
     </ClerkProvider>

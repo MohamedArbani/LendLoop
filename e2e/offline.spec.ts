@@ -13,7 +13,7 @@ test("renders the public landing page without service credentials", async ({ pag
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#tool-board$/);
   await expect(page.getByText("The tool board is offline")).toBeInViewport();
-  await expect(page.getByRole("button", { name: "Sign in" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Sign in to lend or borrow" })).toHaveCount(0);
 });
 
 test("keeps the dashboard behind the public entry point without services", async ({ page }) => {

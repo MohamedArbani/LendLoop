@@ -27,7 +27,7 @@ async function boardDay(ctx: QueryCtx) {
   return clock?.day ?? utcDay();
 }
 
-const publicAvailability = { available: v.boolean(), returnDue: v.union(v.string(), v.null()) };
+const availability = { available: v.boolean(), returnDue: v.union(v.string(), v.null()) };
 
 const pageArgs = {
   pageSize: v.union(...PAGE_SIZES.map((size) => v.literal(size))),
@@ -41,6 +41,7 @@ async function readPage<Table extends "tools" | "loans" | "notifications">(
   prefix: (string | boolean)[],
   pageSize: PageSize,
   cursor: string | null,
+  include?: (doc: Doc<Table>) => Promise<boolean>,
 ) {
   let startIndexKey: (string | boolean | number)[] = prefix;
   if (cursor !== null) {
@@ -78,8 +79,23 @@ async function readPage<Table extends "tools" | "loans" | "notifications">(
     startIndexKey,
     startInclusive: cursor === null,
     endIndexKey: prefix,
-    absoluteMaxRows: pageSize,
+    absoluteMaxRows: include ? pageSize * 2 : pageSize,
   });
+  if (include) {
+    // Bound the scan when many listings are on loan. Resume after the last
+    // checked row unless this batch already contains another matching listing.
+    const matches = await Promise.all(page.map(include));
+    const matchingRows = page.flatMap((doc, index) => (matches[index] ? [{ doc, index }] : []));
+    const visible = matchingRows.slice(0, pageSize);
+    const hasMoreMatches = matchingRows.length > pageSize;
+    const isDone = !hasMore && !hasMoreMatches;
+    const lastIndex = hasMoreMatches ? visible[visible.length - 1].index : page.length - 1;
+    return {
+      page: visible.map(({ doc }) => doc),
+      isDone,
+      continueCursor: isDone ? "" : JSON.stringify([source.index, ...indexKeys[lastIndex]]),
+    };
+  }
   return {
     page,
     isDone: !hasMore,
@@ -100,9 +116,7 @@ async function toolAvailability(ctx: QueryCtx, tool: Id<"tools">, today: string)
 
 export const publicTools = query({
   args: pageArgs,
-  returns: paginationResultValidator(
-    v.object({ name: v.string(), category, ...publicAvailability }),
-  ),
+  returns: paginationResultValidator(v.object({ name: v.string(), category })),
   handler: async (ctx, { pageSize, cursor }) => {
     const today = await boardDay(ctx);
     const result = await readPage(
@@ -111,16 +125,11 @@ export const publicTools = query({
       [false],
       pageSize,
       cursor,
+      async ({ _id }) => (await toolAvailability(ctx, _id, today)).available,
     );
     return {
       ...result,
-      page: await Promise.all(
-        result.page.map(async ({ _id, name, category }) => ({
-          name,
-          category,
-          ...(await toolAvailability(ctx, _id, today)),
-        })),
-      ),
+      page: result.page.map(({ name, category }) => ({ name, category })),
     };
   },
 });
@@ -131,7 +140,7 @@ export const board = query({
     v.object({
       id: v.id("tools"),
       ...listing,
-      ...publicAvailability,
+      ...availability,
       mine: v.boolean(),
       lender: v.union(v.id("members"), v.null()),
       trusted: v.boolean(),

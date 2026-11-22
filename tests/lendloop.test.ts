@@ -106,7 +106,7 @@ async function sendCodeRequest(
 test("guest sees only public fields and members cannot cross ownership or role boundaries", async () => {
   const { t, lender, borrower, other, admin, tool } = await setup();
   expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toEqual([
-    { name: listing.name, category: listing.category, available: true, returnDue: null },
+    { name: listing.name, category: listing.category },
   ]);
   expect((await t.query(api.marketplace.board, { ...FIRST_PAGE, own: false })).page).toEqual([]);
   await expect(t.mutation(api.marketplace.save, listing)).rejects.toThrow();
@@ -185,9 +185,7 @@ test("parallel approvals reserve inclusive date ranges and only the lender can m
   const approved = results[0].status === "fulfilled" ? one : two;
   if (approved === two) vi.setSystemTime(now + 86_400_000);
   await t.mutation(internal.automation.updateBoardClock, {});
-  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toMatchObject([
-    { name: listing.name, available: false, returnDue: tomorrow },
-  ]);
+  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toEqual([]);
   await expect(
     borrower.mutation(api.marketplace.transition, { id: approved, status: "returned" }),
   ).rejects.toThrow();
@@ -242,8 +240,8 @@ test("future bookings block inclusive date ranges and change availability on the
   await t.mutation(internal.automation.updateBoardClock, {});
   const id = await borrower.mutation(api.marketplace.request, request);
   await lender.mutation(api.marketplace.transition, { id, status: "approved" });
-  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toMatchObject([
-    { available: true, returnDue: null },
+  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toEqual([
+    { name: listing.name, category: listing.category },
   ]);
   expect(await other.query(api.marketplace.bookingAvailability, { tool })).toEqual({
     today,
@@ -264,12 +262,14 @@ test("future bookings block inclusive date ranges and change availability on the
 
   vi.setSystemTime(now + 86_400_000);
   await t.mutation(internal.automation.updateBoardClock, {});
-  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toMatchObject([
+  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toEqual([]);
+  expect((await other.query(api.marketplace.board, { ...FIRST_PAGE, own: false })).page).toMatchObject([
     { available: false, returnDue: tomorrow },
   ]);
   vi.setSystemTime(now + 2 * 86_400_000);
   await t.mutation(internal.automation.updateBoardClock, {});
-  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toMatchObject([
+  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toEqual([]);
+  expect((await other.query(api.marketplace.board, { ...FIRST_PAGE, own: false })).page).toMatchObject([
     { available: false, returnDue: null },
   ]);
   await expect(
@@ -285,8 +285,8 @@ test("future bookings block inclusive date ranges and change availability on the
   ).rejects.toThrow("awaiting return");
   await lender.mutation(api.marketplace.transition, { id, status: "returned" });
   await lender.mutation(api.marketplace.transition, { id: future, status: "approved" });
-  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toMatchObject([
-    { available: true, returnDue: null },
+  expect((await t.query(api.marketplace.publicTools, FIRST_PAGE)).page).toEqual([
+    { name: listing.name, category: listing.category },
   ]);
 });
 
@@ -341,6 +341,39 @@ test("catalog cursors bound results, preserve order and apply visibility and cat
   expect(parsePageSize("50")).toBe(50);
   expect(parsePageSize("500")).toBe(10);
   expect(parsePageSize(null)).toBe(10);
+});
+
+test("the guest cursor advances even when a full scan contains only tools on loan", async () => {
+  const { t, lender, borrower } = await setup();
+  const owner = (await lender.query(api.members.viewer, {}))!.id;
+  const borrowerId = (await borrower.query(api.members.viewer, {}))!.id;
+  await t.run(async (ctx) => {
+    for (let index = 0; index < 20; index++) {
+      const tool = await ctx.db.insert("tools", {
+        ...listing,
+        name: `On-loan tool ${index}`,
+        owner,
+        archived: false,
+      });
+      await ctx.db.insert("loans", {
+        tool,
+        lender: owner,
+        borrower: borrowerId,
+        start: today,
+        end: tomorrow,
+        status: "approved",
+      });
+    }
+  });
+  const first = await t.query(api.marketplace.publicTools, FIRST_PAGE);
+  expect(first.page).toEqual([]);
+  expect(first.isDone).toBe(false);
+  const second = await t.query(api.marketplace.publicTools, {
+    ...FIRST_PAGE,
+    cursor: first.continueCursor,
+  });
+  expect(second.page).toEqual([{ name: listing.name, category: listing.category }]);
+  expect(second.isDone).toBe(true);
 });
 
 test("loan and Activity cursors keep member and staff data in their authorized scopes", async () => {
