@@ -4,7 +4,170 @@
 
 LendLoop is a neighborhood tool-lending board built for the Fluence full-stack take-home. Guests see the names and categories of tools available to borrow. Signed-in neighbors can lend tools, request dates, and track loans. n8n coordinates request notifications and overdue reminders, visible in each recipient’s Activity view.
 
-[Run locally](#run-from-a-fresh-clone) · [Demo walkthrough](#walk-through-the-demo) · [Architecture](#architecture)
+[Live deployment](#live-deployment) · [Screens & screenshots](#screens) · [Run locally](#run-from-a-fresh-clone) · [Demo walkthrough](#walk-through-the-demo) · [Architecture](#architecture)
+
+## Live deployment
+
+| Component | Hosted endpoint |
+| --- | --- |
+| Next.js on Vercel | [Open the live LendLoop app](https://lend-loop-hazel.vercel.app/) |
+| n8n on Oracle Cloud Infrastructure | [n8n host](https://lendloopn8n.ddns.net/) with [No-IP DNS](https://www.noip.com/) |
+| Convex Cloud | [Client and query endpoint](https://famous-dove-719.eu-west-1.convex.cloud) |
+| Convex HTTP Actions | [Automation API base URL](https://famous-dove-719.eu-west-1.convex.site) |
+
+Vercel uses the `.convex.cloud` address for `NEXT_PUBLIC_CONVEX_URL`. The n8n instance uses the `.convex.site` address for `CONVEX_SITE_URL` when making signed automation calls.
+
+## Screens
+
+The landing pages, theme menu, sign-in, sign-up, and 404 were captured from the live Vercel app. The signed-in walkthrough uses Playwright with disposable Clerk accounts and sample data on an isolated local Convex deployment.
+
+### Public landing page and tool library
+
+Guests can browse tools that are available now. Each listing shows the tool name and category. **Sign in to lend or borrow** opens Clerk, and the theme control supports light, dark, and system settings.
+
+![LendLoop desktop landing page and public tool library in light mode](screenshots/live-desktop.jpg)
+
+<details>
+<summary>Mobile dark mode and theme menu</summary>
+
+<img src="screenshots/live-mobile-dark.jpg" alt="LendLoop mobile landing page and public tool library in dark mode" width="320">
+
+**Theme menu.** Choose **System**, **Light**, or **Dark** from the header. The app remembers the choice in the browser.
+
+![Theme menu showing System, Light, and Dark options](screenshots/theme-menu.jpg)
+
+</details>
+
+<details>
+<summary>Sign-in, sign-up, and account screens</summary>
+
+**Sign in.** Clerk opens in a modal from the public page. After sign-in, members land on the Neighborhood board.
+
+![Clerk sign-in modal over the LendLoop home page](screenshots/sign-in.png)
+
+**Sign up.** New members can open Clerk’s account creation form from the sign-in modal.
+
+![Clerk sign-up modal over the LendLoop home page](screenshots/sign-up.png)
+
+**Account menu.** The avatar menu opens Clerk’s account settings or signs the member out.
+
+![Signed-in account menu with Manage account and Sign out actions](screenshots/account-menu.jpg)
+
+**Account settings.** Clerk displays the signed-in member’s profile and security settings in a modal.
+
+![Clerk account settings modal for a disposable demo account](screenshots/account-profile.jpg)
+
+</details>
+
+### Neighborhood board
+
+<details>
+<summary>Explore and filter the tool library</summary>
+
+**Explore.** The board shows availability, condition, description, and any Trusted Lender badge for each tool. Members can request dates for a neighbor’s listing or edit their own. The overview cards show available tools, your listings, and pending incoming requests.
+
+![Explore tab with the board overview, category filter, and tool cards](screenshots/explore.jpg)
+
+**Category filter.** Use **Category** to narrow the library. On longer lists, pagination offers 10, 25, 50, or 100 items per page. The browser remembers the selected page size across the board and Activity.
+
+![Category dropdown open on the Explore tab](screenshots/category-filter.jpg)
+
+</details>
+
+<details>
+<summary>My listings and listing dialogs</summary>
+
+**My listings.** Find the tools you share and use each card’s actions to edit or remove it.
+
+![My listings tab with edit and remove actions](screenshots/my-listings.jpg)
+
+**List a tool.** Enter a name, category, condition, and short description. Saving adds the tool to the library.
+
+![New listing form filled with sample details](screenshots/create-listing.jpg)
+
+**Edit listing.** The same form opens with the current details filled in.
+
+![Edit listing form with the existing tool details](screenshots/edit-listing.jpg)
+
+**Remove listing.** The confirmation explains that pending requests will be cancelled. Active loans can still be returned.
+
+![Remove listing confirmation with options to keep or remove the listing](screenshots/remove-listing.jpg)
+
+</details>
+
+<details>
+<summary>Request dates, booking calendar, and loan views</summary>
+
+**Request dates.** Choose the first and last day of the loan and send the request to the lender. Loan dates are inclusive UTC calendar days.
+
+![Borrow request dialog with both dates selected](screenshots/request-dates.jpg)
+
+**Booking calendar.** The date picker disables past or booked days. The return-date picker also prevents selecting a range that crosses a booking.
+
+![Booking calendar open beside the request dialog](screenshots/booking-calendar.jpg)
+
+**My requests.** Borrowers can track request status and dates, cancel pending requests, and see the most recent reminder date when available.
+
+![Borrower’s My requests tab with several loan statuses and a reminder date](screenshots/my-requests.jpg)
+
+**Incoming requests.** Lenders can approve or decline pending requests for their own listings and mark eligible approved loans returned.
+
+![Lender’s Incoming requests tab showing approval, decline, and return controls](screenshots/incoming-requests.jpg)
+
+</details>
+
+<details>
+<summary>Activity and request details</summary>
+
+**Activity.** The side panel groups notifications by UTC day. It shows request events and overdue reminders for the signed-in recipient.
+
+![Activity panel with approval, return, and overdue reminder notifications](screenshots/activity.jpg)
+
+**Request details.** Open an Activity item to see the tool, current loan status, dates, and any recorded reminder date.
+
+![Request details dialog opened from a return reminder](screenshots/request-details.jpg)
+
+</details>
+
+### Administrator views
+
+<details>
+<summary>All loans and listing moderation</summary>
+
+**All loans.** Admins can review loan history for the entire neighborhood and manage Trusted Lender badges.
+
+![Admin-only All loans tab with loan cards and Trusted Lender controls](screenshots/admin-loans.jpg)
+
+**Listing moderation.** On Explore, admins can mark a lender trusted or remove the badge. They can also remove any listing using the same confirmation shown to owners.
+
+![Admin Explore tab with Trusted Lender and removal controls on tool cards](screenshots/admin-moderation.jpg)
+
+</details>
+
+### Empty and unavailable states
+
+<details>
+<summary>Empty requests, missing pages, and service errors</summary>
+
+**Empty requests.** An empty tab explains what will appear there. The tool library and Activity also have empty states, and each view shows a loading indicator while it fetches data.
+
+![My requests empty state directing members to the tool library](screenshots/empty-requests.jpg)
+
+**Page not found.** The 404 page offers a route back to the previous page or to the public board.
+
+![LendLoop 404 page with Back to home and Go back actions](screenshots/not-found.jpg)
+
+**Public catalog unavailable.** The landing page stays visible and gives guests a message to refresh when the catalog fails to load.
+
+![Public landing page with the tool library unavailable notice](screenshots/catalog-offline.jpg)
+
+**Dashboard error.** The dashboard displays a **Try again** action when it fails to load listings and requests.
+
+![Dashboard error message with a Try again button](screenshots/dashboard-error.jpg)
+
+The dashboard also offers **Try again** when Convex authentication or first-time account setup fails.
+
+</details>
 
 ## Run from a fresh clone
 
